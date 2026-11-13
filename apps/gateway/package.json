@@ -1,0 +1,11 @@
+{
+  "name": "@quotacarry/gateway",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/main.js",
+    "test": "npm run build && node --test dist/server.test.js"
+  }
+}

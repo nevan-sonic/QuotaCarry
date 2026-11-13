@@ -1,0 +1,12 @@
+node_modules/
+.next/
+dist/
+target/
+.env*
+!.env.example
+*.pem
+*.key
+.near-credentials/
+coverage/
+*.tsbuildinfo
+next-env.d.ts

@@ -1,0 +1,67 @@
+name: Foundation checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm --version | grep -Fx 11.19.1
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: rustup show
+      - run: rustc --version && cargo --version
+      - run: cargo fmt --manifest-path contracts/quota-pass/Cargo.toml --all -- --check
+      - run: cargo clippy --manifest-path contracts/quota-pass/Cargo.toml --locked --all-targets -- -D warnings
+      - run: cargo test --manifest-path contracts/quota-pass/Cargo.toml --locked
+      - name: Build WASM
+        working-directory: contracts/quota-pass
+        run: |
+          curl -fsSLo /tmp/cargo-near.tar.gz https://github.com/near/cargo-near/releases/download/cargo-near-v0.23.0/cargo-near-x86_64-unknown-linux-gnu.tar.gz
+          echo "94008b827a457750257eced4b571c33736062cc3bd1ffda3e7af70e2bc9a4073  /tmp/cargo-near.tar.gz" | sha256sum --check
+          mkdir -p /tmp/quotacarry-cargo-near
+          tar -xzf /tmp/cargo-near.tar.gz -C /tmp/quotacarry-cargo-near
+          export PATH="$(dirname "$(find /tmp/quotacarry-cargo-near -type f -name cargo-near -print -quit)"):$PATH"
+          cargo near --version
+          cargo near build non-reproducible-wasm --locked --no-abi --out-dir "$RUNNER_TEMP/quotacarry-wasm"
+          cd "$RUNNER_TEMP/quotacarry-wasm"
+          test -s quota_pass.wasm
+          test "$(od -An -tx1 -N8 quota_pass.wasm | tr -d ' \n')" = 0061736d01000000
+          sha256sum quota_pass.wasm | tee SHA256SUMS
+          {
+            printf '### Contract build artifact\n\n'
+            printf 'Commit: `%s`\n\n' "$GITHUB_SHA"
+            printf 'Artifact: `quota-pass-wasm-%s`\n\n' "$GITHUB_SHA"
+            printf '    %s\n' "$(cat SHA256SUMS)"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Scan files and history
+        run: |
+          asset=gitleaks_8.30.0_linux_x64.tar.gz
+          curl -fsSLO "https://github.com/gitleaks/gitleaks/releases/download/v8.30.0/$asset"
+          curl -fsSLO https://github.com/gitleaks/gitleaks/releases/download/v8.30.0/gitleaks_8.30.0_checksums.txt
+          grep "  $asset$" gitleaks_8.30.0_checksums.txt | sha256sum --check
+          tar -xOzf "$asset" gitleaks > /tmp/gitleaks
+          chmod +x /tmp/gitleaks
+          /tmp/gitleaks git --log-opts="--all" --redact --no-banner
+          mkdir /tmp/quotacarry-scan
+          git ls-files -z | tar --null -T - -cf - | tar -xf - -C /tmp/quotacarry-scan
+          /tmp/gitleaks dir --redact --no-banner /tmp/quotacarry-scan
+      - name: Upload contract WASM
+        uses: actions/upload-artifact@v7
+        with:
+          name: quota-pass-wasm-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/quotacarry-wasm/quota_pass.wasm
+            ${{ runner.temp }}/quotacarry-wasm/SHA256SUMS
+          if-no-files-found: error
