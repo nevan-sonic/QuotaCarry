@@ -1,6 +1,14 @@
 # Phase 0 verification
 
-## Foundation commands and toolchain
+## Linux CI closeout
+
+- Repository [nevan-sonic/QuotaCarry](https://github.com/nevan-sonic/QuotaCarry), branch `main`. The foundation commit `490e0c2b6e054de20a825379bb01c3e989d4a028` was pushed to the previously empty remote after a reviewed 42-file allowlist, staged diff checks, and clean Gitleaks file and history scans.
+- [Foundation checks run 43398046300](https://github.com/nevan-sonic/QuotaCarry/actions/runs/43398046300) succeeded on Ubuntu 24.04. The [verify job logs](https://github.com/nevan-sonic/QuotaCarry/actions/runs/43398046300/job/131793715114) show Node 24.22.3/npm 11.19.1 and Rust/Cargo 1.99.1 with the WASM target. All JS steps passed (`npm ci`, lint, typecheck, three gateway tests, production builds). Rust formatting, Clippy with warnings denied, and one Rust unit test passed.
+- From `contracts/quota-pass`, Cargo NEAR 0.23.0 ran `cargo near build non-reproducible-wasm --locked --no-abi --out-dir "$RUNNER_TEMP/quotacarry-wasm"`. Artifact `quota-pass-wasm-490e0c2b6e054de20a825379bb01c3e989d4a028` contains `quota_pass.wasm` and `SHA256SUMS`. The downloaded file passed the WASM header check and matched the manifest, SHA-256 `e298eee365c4cac50c6f8956ead4a491472e363648700d26eb2abd214783d8f6`. The contract has not been deployed.
+- Gitleaks passed in Linux CI for Git history and tracked files. The Linux run resolved the verification gap caused by Windows Application Control. Windows policy remains in force.
+- **Ready for Phase 1 approval.** The updated [ADR](ADR-0001-FOUNDATION.md) preserves NEP-171 onward transfers and gates compute while any callback remains unresolved. Real receiver and wallet tests, provider credentials in managed secret storage, and authorization for signed testnet deployment remain later milestones. No provider inference or signed-wallet integration has been verified.
+
+## Earlier Windows checks
 
 - `git init` created a local repository. Git 2.56.0.windows.4 has no configured author identity in this workspace. Both lockfiles are present in the working tree. No commit, push, deployment or signed transaction was performed.
 - Foundation pins are Node 24.22.3 with npm 11.19.1, TypeScript 5.9.3, ESLint 10.14.0, typescript-eslint 8.72.2, Next.js 16.4.6, React/React DOM 19.3.1 and Tailwind/PostCSS 4.3.5. Node 26.13.0/npm 11.20.0 were the initial host defaults. The initial dependency install warned about engine mismatch and ESLint 9 support. An early check while npm was still installing saw missing modules. The checks were rerun after `npm ci` under the pinned runtime. [Node 24.22.3](https://nodejs.org/en/blog/release/v24.22.3) · [Next.js 16.4](https://nextjs.org/blog/next-16-4) · [ESLint version support](https://eslint.org/version-support/)
@@ -11,7 +19,7 @@
 
 ## NEAR and deployment feasibility
 
-**Rust verification blocker.** Visual Studio Build Tools 17.14.45 and the Windows SDK supplied the missing native linker and libraries. Intermediate retries during installation failed on `kernel32.lib` and `dbghelp.lib`. After those were available, Cargo NEAR successfully invoked the compiler and linker, but Windows Application Control blocked execution of Cargo-generated dependency build scripts (OS error 4551). The WASM artifact, Rust unit tests and Clippy remain unverified. Rerun the documented Rust commands on a policy-approved Linux runner or a Windows environment authorized to execute Cargo build scripts. GitHub Actions is configured for Linux but has not run.
+**Windows build history.** Visual Studio Build Tools 17.14.45 and the Windows SDK supplied the missing native linker and libraries. Intermediate retries during installation failed on `kernel32.lib` and `dbghelp.lib`. After those were available, Windows Application Control blocked Cargo-generated dependency build scripts (OS error 4551). The Ubuntu run above verified the same foundation without changing Windows policy.
 
 - Read-only JSON-RPC `block` with `finality: final` succeeded on `https://rpc.testnet.near.org` at height 277485945 (hash `83nXqBGgdc29cdWuQVURRfNM39Ee2tnJXSN4SZPQ18jo`) and `https://test.rpc.fastnear.com` at 277485947 (hash `DueMz3saYNeygmcSbvb5CXAZEVFLBAmqV7tP5nB8QkeL`). FastNEAR also returned the same hash as the first RPC for the exact height 277485945. Neardata `GET https://testnet.neardata.xyz/v0/block/277485945` returned that hash and 10 shard payloads. This verifies recent history feasibility. Archive retention, continuity and third-party QuotaCarry event coverage remain deployment checks. [RPC providers](https://docs.near.org/api/rpc/providers) · [Neardata](https://docs.fastnear.com/neardata)
 - Transaction consumers must query `FINAL` and validate successful relevant receipt outcomes, contract, inputs or events and resulting state. Inclusion alone does not establish execution. Use indexer projections for history only. [Transaction RPC](https://docs.near.org/api/rpc/transactions)
