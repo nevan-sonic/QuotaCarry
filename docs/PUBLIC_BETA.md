@@ -2,11 +2,11 @@
 
 [Public app](https://quotacarry-web.quotacarry.workers.dev/) · [Gateway readiness](https://quotacarry-gateway.quotacarry.workers.dev/ready)
 
-Connect a NEAR testnet wallet and authenticate with its NEP-413 message signature. The dashboard shows finalized NFT ownership and credit balances. Claims and inference remain closed pending the budget approval below. A completed claim will appear in the dashboard after the scheduled mint and finalized receipt. One claim per account is an abuse deterrent. A person can control multiple accounts.
+Connect a NEAR testnet wallet and authenticate with its NEP-413 message signature. The dashboard shows finalized NFT ownership and credit balances. Claims and inference opened under the approved budget below. A completed claim will appear in the dashboard after the scheduled mint and finalized receipt. One claim per account is an abuse deterrent. A person can control multiple accounts.
 
 The Worker uses D1 to serialize claims and inference. Claims persist the transaction hash before broadcast. A pending hash is reconciled by finalized reads and is never resent automatically. An unresolved mint blocks new mints. Failed claims retain their allocation for operator review. Inference rechecks ownership when queued and again when reserving. Provider ambiguity leaves the reservation open. An operator must reconcile it before deciding on settlement. Kill switches stop new work. Existing settlement recovery can continue with the configured policy and keys.
 
-## Launch approval
+## Approved launch limits
 
 - Register a fresh issuer with the existing issuer, relayer and settler accounts as controller, authorizer and settler. Lifetime cap 20, max open 1, deposit 0.43 NEAR. The 42,240-byte issuer, policy and ten-pass budget costs 0.4224 NEAR at the verified storage price.
 - The controller creates one policy with lifetime cap 20 and max open 1. Derive its ID from the finalized receipt. Provision the issuer signer as the Worker secret QC_ISSUER_KEY and configure QC_POLICY_ID. Enable QC_CLAIMS_ENABLED and QC_INFERENCE_ENABLED only after approval.
@@ -18,3 +18,17 @@ The Worker uses D1 to serialize claims and inference. Claims persist the transac
 ## Recording
 
 After approval, record wallet A connecting, signing authentication, claiming, and transferring the fresh NFT. Then record wallet B authenticating, running one prompt, and opening both finalized receipts. Keep historical NFTs 0 and 1 out of the beta test. Until that run succeeds, show the prior verified transfer and production Groq response as historical evidence. See [submission notes](HACKATHON_SUBMISSION.md).
+
+## Finalized launch evidence
+
+Issuer 2 and policy 2 were verified at finalized block 277637486 with zero credits issued. Setup used 1.0305598249634567 NEAR gross, including 0.60 NEAR in signer top-ups, 0.43 NEAR in issuer storage funding, and 0.0005598249634567 NEAR in fees. Fifty service calls remained with a 0.64 NEAR buffered fee projection. Historical NFTs 0 and 1 matched their prelaunch snapshots.
+
+| Action | Transaction | Fee in yoctoNEAR |
+|---|---|---:|
+| topup (issuer) | [24Pnh1zZ9LUJW4kboZogWheGaKLHhSnbgoewHS3Yhjpa](https://explorer.testnet.near.org/transactions/24Pnh1zZ9LUJW4kboZogWheGaKLHhSnbgoewHS3Yhjpa) | 44636512500000000000 |
+| topup (relayer) | [iSiFcMrWEv7mRgpgs3qbYTSxofqBvxTfQJ1eNLE3U8o](https://explorer.testnet.near.org/transactions/iSiFcMrWEv7mRgpgs3qbYTSxofqBvxTfQJ1eNLE3U8o) | 44636512500000000000 |
+| topup (settler) | [EAjVji9VMnzehDVfzQotCgBdayakaDtNQnfW5RjRumVW](https://explorer.testnet.near.org/transactions/EAjVji9VMnzehDVfzQotCgBdayakaDtNQnfW5RjRumVW) | 44636512500000000000 |
+| register_issuer (gov) | [2rwZDgRojt1YraZgGaeJjTidP65cxstz5eV83mQa2iuN](https://explorer.testnet.near.org/transactions/2rwZDgRojt1YraZgGaeJjTidP65cxstz5eV83mQa2iuN) | 208224412946800000000 |
+| create_policy (issuer) | [CKfJz9trt788Ssvh6VCT4nAhc8Ry36pJqvubj6GxbfxS](https://explorer.testnet.near.org/transactions/CKfJz9trt788Ssvh6VCT4nAhc8Ry36pJqvubj6GxbfxS) | 217691013009900000000 |
+
+The operator confirmed successful browser authentication in Edge with two independent wallets. An isolated recovery test confirmed that an interrupted provider call retains its reservation and enters manual review without replay or settlement.
