@@ -32,4 +32,26 @@ Install workspace packages with `npm ci`. Run `npm run lint`, `npm run typecheck
 
 The frontend reads snapshots from finalized testnet RPC with read-only failover, refreshes every 20 seconds, and checks the final receipt after a wallet transfer. The local production API returned the expected token state and independently resolved the historical transfer. An app-initiated wallet transfer still needs a live browser test with a separately approved transaction.
 
-Gateway modules provide NEP-413 challenge and signature primitives, SQLite replay/idempotency primitives, a Groq chat completions adapter, and a reservation-first orchestration interface. The HTTP gateway currently serves health only. It needs an authenticated HTTP integration, finalized access-key authorization, privileged chain adapters, a durable result journal and a restart recovery worker before serving inference. Ambiguous provider outcomes require reconciliation before release. No Groq model or API credential has been configured or exercised. The issuer lifetime cap of 100 is exhausted, so fresh integration tests require separately approved issuance capacity.
+The authenticated gateway and playground are implemented. Public deployment and live inference verification are pending.
+
+## Gateway deployment and recovery
+
+The gateway exposes /health for process liveness and /ready for configuration status. Run one gateway process with a persistent volume for QC_DB and its SQLite WAL. Set QC_ORIGIN to the exact frontend origin. Build the web app with NEXT_PUBLIC_QC_GATEWAY set to the public gateway HTTPS URL. Set GROQ_API_KEY, GROQ_MODEL, QC_RELAYER_KEY and QC_SETTLER_KEY using the gateway host secret manager. Keep the database private because it contains model output. Choose QC_POLICY_ID explicitly. The supplied testnet deployment can serve policy 0 only after separately authorized signer and provider configuration.
+
+The wallet signs a NEP-413 challenge bound to the frontend domain, testnet, inference action and a two-minute nonce. The gateway verifies the finalized account key and stores a hash of the short-lived bearer token. A unique job per token and a single active worker serialize requests. The provider call occurs after finalized reservation verification. The worker records a transaction hash before each broadcast and reconciles ambiguous sends by read-only hash queries. On restart it can resume a settlement that was durably selected and had no settlement hash. A reserved job interrupted before or during provider execution can require operator reconciliation. Resolve ambiguous provider outcomes before releasing credits. Keep one worker instance to preserve signer nonce ordering.
+
+Live Groq and wallet integration verification remain pending. Issuer 0 has no remaining mint capacity. Preserve the historical NFT and obtain separate authorization for any testnet writes used to verify the deployment.
+
+```mermaid
+flowchart LR
+  Wallet -->|NEP-413 signature| Web
+  Web -->|Authenticated job| Gateway
+  Web -->|Finalized reads| NEAR
+  Gateway -->|Persist job and transaction hash| SQLite
+  Gateway -->|Reserve through relayer| NEAR
+  Gateway -->|After finalized reservation| Groq
+  Gateway -->|Settle through settler| NEAR
+  Gateway -->|Finalized response and receipts| Web
+```
+
+Deploy the web workspace as a Next.js server and the gateway as a single Node process behind HTTPS. Use the repository Node pin, build from the monorepo root, set GATEWAY_HOST to the private interface exposed to the HTTPS proxy, and mount a persistent private directory for QC_DB. Verify both health routes and an authenticated testnet request before announcing a live URL. Keep backups and restrict access to the database and signer secrets.

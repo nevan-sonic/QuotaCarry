@@ -1,4 +1,5 @@
 'use client';
+import {Playground} from './playground';
 
 import {useCallback, useEffect, useRef, useState, type FormEvent} from 'react';
 import type {NearConnector} from '@hot-labs/near-connect';
@@ -120,7 +121,8 @@ export default function Home() {
       </article>)}
       <p role="status">{walletStatus} {transaction&&<a href={explorer+'/transactions/'+transaction}>View transaction ↗</a>}</p>
     </section>
+    <Playground key={account} account={account} tokens={snapshot?.passes.filter(pass=>pass.token.owner_id===account).map(pass=>pass.token.token_id)??[]} connector={connector.current} onSettled={()=>void refresh(account)}/>
     <section id="history" className="card"><p className="eyebrow">HISTORICAL VERIFIED DEMO</p><h2>100 credits, one ownership handoff</h2><p>Alice reserved three credits before transferring token 0. The contract rejected a stale Alice request, accepted Bob’s request, and finalized with 98 available and two consumed.</p><div className="links"><a href={explorer+'/transactions/davp7Z7GTM4FBzRxKLyAFRhJSf6moJg49K5dN3PZxiQ'}>Transfer ↗</a><a href={explorer+'/transactions/2cUdDxFQT3cbAjexjxE6MgYNgkFPVFe3wy2MtnrADb8t'}>Stale request ↗</a><a href={explorer+'/transactions/J7TceTF9PqfMM1MREFnnVs59FLF6zNnjddJoBHwXgNRK'}>Final settlement ↗</a></div></section>
-    <footer><a href="https://github.com/nevan-sonic/QuotaCarry">GitHub ↗</a><span>AI inference · Not configured</span></footer>
+    <footer><a href="https://github.com/nevan-sonic/QuotaCarry">GitHub ↗</a></footer>
   </main>;
 }

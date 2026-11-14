@@ -2,8 +2,8 @@ import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto';
 
 const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
-function base58(text: string) {
-  if (!text || text.length > 44) throw Error('Invalid public key');
+export function base58(text: string, limit = 44) {
+  if (!text || text.length > limit) throw Error('Invalid public key');
   let number = 0n;
   for (const char of text) {
     const digit = alphabet.indexOf(char);
@@ -29,7 +29,7 @@ export function createChallenge(accountId: string, audience: string, now = Date.
   const expiresAt = now + 120_000;
   return {
     accountId, audience, expiresAt, nonce: nonce.toString('base64'),
-    message: JSON.stringify({purpose:'QuotaCarry inference authentication',accountId,audience,expiresAt,nonce:nonce.toString('base64')}),
+    message: JSON.stringify({purpose:'QuotaCarry inference authentication',network:'testnet',action:'inference',accountId,audience,expiresAt,nonce:nonce.toString('base64')}),
   };
 }
 

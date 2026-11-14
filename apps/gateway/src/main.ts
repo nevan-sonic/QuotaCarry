@@ -1,10 +1,11 @@
+import { createInferenceApi } from './api.js';
 import { readConfig } from './config.js';
 import { createGateway } from './server.js';
 
 function main() {
   const config = readConfig(process.env);
   const log = (entry: Record<string, unknown>) => process.stdout.write(JSON.stringify(entry) + '\n');
-  const gateway = createGateway(log);
+  const gateway = createGateway(log, createInferenceApi(process.env));
   gateway.server.on('error', (error: NodeJS.ErrnoException) => {
     log({ event: 'server_error', code: error.code ?? 'UNKNOWN' });
     process.exitCode = 1;

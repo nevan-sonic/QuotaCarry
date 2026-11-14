@@ -10,3 +10,8 @@ target/
 coverage/
 *.tsbuildinfo
 next-env.d.ts
+
+# Local inference database and SQLite sidecars
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
