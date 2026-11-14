@@ -1,6 +1,6 @@
 import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import type {D1Database,ExecutionContext} from '@cloudflare/workers-types';
-import {authorizedKey,createChain,finalized,listEntitlements,readEntitlement,readIssuer,type Intent} from './chain.js';
+import {authorizedKey,createChain,finalized,listEntitlements,readEntitlement,readIssuer,readPolicy,type Intent} from './chain.js';
 import {createChallenge,verifyNearMessage} from './near-message.js';
 import {createGroqProvider,ProviderError} from './groq.js';
 import {mintDeveloperToken,revokeDeveloperToken,readDeveloperToken,matchesEntitlement,rotateDeveloperToken} from './developer-tokens.js';
@@ -151,7 +151,7 @@ async function handle(req:Request,env:Env){
   headers.set('Access-Control-Allow-Methods','GET, POST, OPTIONS');
   headers.set('Access-Control-Allow-Headers','Content-Type, Authorization, Idempotency-Key');
   if(req.method==='OPTIONS')return new Response(null,{status:204,headers});
-  if(!path.startsWith('/v1/')&&!['/v2/tokens','/v2/issuer-adapter','/v2/nfts','/v2/team'].includes(path))return respond({error:'Route not found'},404);
+  if(!path.startsWith('/v1/')&&!['/v2/tokens','/v2/issuer-adapter','/v2/nfts','/v2/team','/v2/history','/v2/issuer-requests','/v2/issuer-actions'].includes(path))return respond({error:'Route not found'},404);
   const now=Date.now(), minute=Math.floor(now/60000);
   const bucket=hash((req.headers.get('CF-Connecting-IP')??'local')+':'+minute);
   const limit=await env.DB.prepare('INSERT INTO limits VALUES (?,1,?) ON CONFLICT(bucket) DO UPDATE SET count=count+1 RETURNING count')
@@ -202,6 +202,65 @@ async function handle(req:Request,env:Env){
   const walletSession=bearer&&await env.DB.prepare('SELECT account,public_key FROM sessions WHERE token=? AND expires>?').bind(hash(bearer),now).first<{account:string;public_key:string}>();
   const session=credential?{account:credential.account,public_key:''}:walletSession;
   if(!session)return respond({error:'Authenticate your wallet'},401);
+  if(path==='/v2/issuer-actions'&&req.method==='POST'){
+    const {issuer,action}=input;
+    const id=(value:unknown):value is string=>typeof value==='string'&&/^(0|[1-9][0-9]{0,19})$/.test(value);
+    const quantity=(value:unknown):value is string=>typeof value==='string'&&/^[1-9][0-9]{0,38}$/.test(value)&&BigInt(value)<2n**128n;
+    if(!id(issuer)||['0','1','2'].includes(issuer))return respond({error:'Invalid issuer'},400);
+    if(!await authorizedKey(session.account,session.public_key))return respond({error:'Wallet key revoked'},401);
+    const config=await readIssuer(issuer);
+    if(config?.controller!==session.account||config.paused)return respond({error:'Active issuer controller required'},403);
+    if(action==='policy'){
+      const {policyHash,cap,maxOpen}=input;
+      if(typeof policyHash!=='string'||!/^[a-f0-9]{64}$/.test(policyHash)||!quantity(cap)||BigInt(cap)>BigInt(config.lifetime_cap)||
+        typeof maxOpen!=='number'||!Number.isInteger(maxOpen)||maxOpen<1||maxOpen>config.max_open)return respond({error:'Invalid policy limits or hash'},400);
+      return respond({method:'create_policy',args:{issuer_id:issuer,policy_hash:policyHash,lifetime_cap:cap,max_open:maxOpen}});
+    }
+    if(action==='mint'){
+      const {policy,receiver,amount}=input;
+      if(!id(policy)||typeof receiver!=='string'||receiver.length>64||!account.test(receiver)||!quantity(amount))return respond({error:'Invalid mint parameters'},400);
+      const selected=await readPolicy(policy);
+      if(selected?.issuer_id!==issuer||selected.suspended||selected.denomination_version!==1||
+        BigInt(amount)+BigInt(selected.issued)>BigInt(selected.lifetime_cap)||BigInt(amount)+BigInt(config.issued)>BigInt(config.lifetime_cap))return respond({error:'Policy unavailable or cap exceeded'},409);
+      return respond({method:'issue',args:{policy_id:policy,receiver_id:receiver,amount,expected_issue_seq:config.next_issue_seq}});
+    }
+    return respond({error:'Unknown issuer action'},400);
+  }
+  if(path==='/v2/issuer-requests'){
+    if(!await authorizedKey(session.account,session.public_key))return respond({error:'Wallet key revoked'},401);
+    const governance=session.account==='quotacarry-fund-7b29e1.testnet';
+    if(req.method==='GET'){
+      const requests=governance
+        ?await env.DB.prepare('SELECT * FROM qc_issuer_requests ORDER BY updated DESC LIMIT 50').all()
+        :await env.DB.prepare('SELECT * FROM qc_issuer_requests WHERE account=?').bind(session.account).all();
+      return respond({requests:requests.results,governance});
+    }
+    if(req.method!=='POST')return respond({error:'Method rejected'},405);
+    if(input.action==='submit'&&typeof input.name==='string'&&input.name.trim()&&input.name.length<=64){
+      const result=await env.DB.prepare("INSERT OR IGNORE INTO qc_issuer_requests VALUES (?,?,'pending',NULL,?)")
+        .bind(session.account,input.name.trim(),now).run();
+      return result.meta.changes===1?respond({state:'pending'},201):respond({error:'A request already exists'},409);
+    }
+    if(!governance||typeof input.account!=='string'||!account.test(input.account))return respond({error:'Governance required'},403);
+    const target=input.account;
+    if(input.action==='approve'||input.action==='reject'){
+      const next=input.action==='approve'?'approved':'rejected';
+      const result=await env.DB.prepare("UPDATE qc_issuer_requests SET state=?,updated=? WHERE account=? AND state='pending'").bind(next,now,target).run();
+      return result.meta.changes===1?respond({state:next}):respond({error:'Pending request unavailable'},409);
+    }
+    if(input.action==='finalize'&&typeof input.issuer==='string'&&/^[0-9]{1,20}$/.test(input.issuer)&&!['0','1','2'].includes(input.issuer)){
+      const issuer=await readIssuer(input.issuer);
+      if(issuer?.controller!==target)return respond({error:'Finalized controller mismatch'},409);
+      const result=await env.DB.prepare("UPDATE qc_issuer_requests SET state='finalized',issuer=?,updated=? WHERE account=? AND state='approved'").bind(input.issuer,now,target).run();
+      return result.meta.changes===1?respond({state:'finalized'}):respond({error:'Approved request unavailable'},409);
+    }
+    return respond({error:'Invalid governance action'},400);
+  }
+  if(path==='/v2/history'&&req.method==='GET'){
+    const rows=await env.DB.prepare('SELECT id,token,issuer,state,created,reserve_hash,settle_hash FROM jobs WHERE account=? ORDER BY created DESC LIMIT 50')
+      .bind(session.account).all();
+    return respond({jobs:rows.results});
+  }
   if(path==='/v2/nfts'&&req.method==='GET'){
     const from=new URL(req.url).searchParams.get('from')??'0';
     if(!/^\d{1,20}$/.test(from))return respond({error:'Invalid cursor'},400);

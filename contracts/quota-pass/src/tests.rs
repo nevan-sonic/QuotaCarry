@@ -17,6 +17,71 @@ fn context(name: &str, deposit: u128) {
 }
 
 #[test]
+fn metered_reservations_preserve_conservation_after_transfer() {
+    context("quota", NearToken::from_near(1).as_yoctonear());
+    let mut contract = QuotaPass::new(account("quota"));
+    let issuer = contract.register_metered_issuer(
+        account("issuer"),
+        account("relay"),
+        account("settler"),
+        U128(500),
+        4,
+    );
+    context("issuer", 0);
+    let policy = contract.create_policy(issuer, "a".repeat(64), U128(500), 4);
+    let nft = contract.issue(policy, account("alice"), U128(500), U64(0));
+    context("relay", 0);
+    contract.reserve_tokens(
+        nft.clone(),
+        account("alice"),
+        U64(0),
+        U64(0),
+        "b".repeat(64),
+        U64(110),
+        U128(100),
+    );
+    assert_eq!(
+        contract.get_token_reservation_maximum(nft.clone(), U64(0)),
+        Some(U128(100))
+    );
+    context("alice", 1);
+    contract.nft_transfer(account("bob"), nft.clone(), None, None);
+    context("relay", 0);
+    contract.reserve_tokens(
+        nft.clone(),
+        account("bob"),
+        U64(1),
+        U64(1),
+        "c".repeat(64),
+        U64(110),
+        U128(200),
+    );
+    context("settler", 0);
+    assert_eq!(
+        contract.settle_tokens(nft.clone(), U64(0), U128(40)),
+        SettlementResult::Applied
+    );
+    assert_eq!(
+        contract.settle_tokens(nft.clone(), U64(0), U128(40)),
+        SettlementResult::Duplicate
+    );
+    assert_eq!(
+        contract.settle_tokens(nft.clone(), U64(0), U128(41)),
+        SettlementResult::Conflict
+    );
+    assert_eq!(
+        contract.settle_tokens(nft.clone(), U64(1), U128(0)),
+        SettlementResult::Applied
+    );
+    let pass = contract.get_allowance(nft).unwrap();
+    let totals = contract.get_policy(policy).unwrap();
+    assert_eq!(pass.owner_id, account("bob"));
+    assert_eq!(pass.open, 0);
+    assert_eq!(pass.available.0, 460);
+    assert_eq!(totals.consumed.0 + totals.available.0, totals.issued.0);
+}
+
+#[test]
 fn randomized_conservation_and_storage_reuse() {
     context("quota", 0);
     let mut contract = QuotaPass::new(account("quota"));

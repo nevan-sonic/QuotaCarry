@@ -48,6 +48,9 @@ export async function readEntitlement(token_id:string) {
 export async function readIssuer(issuer_id:string){
   return view('get_issuer',{issuer_id},await block());
 }
+export async function readPolicy(policy_id:string){
+  return view('get_policy',{policy_id},await block());
+}
 export async function listEntitlements(account_id:string,from_index:string){
   const b=await block();
   const tokens=await view('nft_tokens_for_owner',{account_id,from_index,limit:10},b) as {token_id:string}[];
@@ -131,8 +134,11 @@ export function createChain(relayerSecret:string,settlerSecret:string,policyId:s
       return send(controller,'issue',{policy_id:policyId,receiver_id:owner,amount:'2',expected_issue_seq:issuer.next_issue_seq},'issue',intent,b,save);
     },
     async eligible(owner:string,tokenId:string){
-      const pass=await view('get_allowance',{token_id:tokenId},await block());
-      return Boolean(pass&&pass.owner_id===owner&&pass.policy_id===policyId&&BigInt(pass.available)>0n&&pass.pending===0);
+      const b=await block();
+      const pass=await view('get_allowance',{token_id:tokenId},b);
+      if(!pass||pass.owner_id!==owner||pass.policy_id!==policyId||BigInt(pass.available)<1n||pass.pending!==0)return false;
+      const policy=await view('get_policy',{policy_id:policyId},b);
+      return policy?.denomination_version===1&&!policy.suspended;
     },
     async reserve(account:string,tokenId:string,commitment:string,save:(i:Intent)=>void|Promise<void>,expectedEpoch?:string,expectedIssuer?:string){
       const b=await block();

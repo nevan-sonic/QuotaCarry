@@ -1,3 +1,4 @@
+mod metered;
 mod model;
 mod nft;
 #[cfg(test)]
@@ -35,6 +36,9 @@ enum Key {
     Reservations,
     Settlements,
     Pending,
+    MeteredIssuers,
+    MeteredAmounts,
+    MeteredSettlements,
 }
 
 #[near(contract_state)]
@@ -208,7 +212,11 @@ impl QuotaPass {
             &Policy {
                 issuer_id,
                 policy_hash: policy_hash.clone(),
-                denomination_version: 1,
+                denomination_version: if self.metered_issuers().contains_key(&issuer_id.0) {
+                    2
+                } else {
+                    1
+                },
                 lifetime_cap,
                 issued: U128(0),
                 available: U128(0),
@@ -339,6 +347,28 @@ impl QuotaPass {
         request_commitment: String,
         valid_through_height: U64,
     ) {
+        self.reserve_units(
+            token_id,
+            holder_id,
+            expected_epoch,
+            seq,
+            request_commitment,
+            valid_through_height,
+            None,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn reserve_units(
+        &mut self,
+        token_id: String,
+        holder_id: AccountId,
+        expected_epoch: U64,
+        seq: U64,
+        request_commitment: String,
+        valid_through_height: U64,
+        maximum: Option<U128>,
+    ) {
         assert_digest(&request_commitment);
         let height = env::block_height();
         require!(
@@ -350,6 +380,11 @@ impl QuotaPass {
         );
         let mut pass = self.pass(&token_id);
         let mut policy = self.policy(pass.policy_id);
+        let units = maximum.map_or(1, |amount| amount.0);
+        require!(
+            policy.denomination_version == if maximum.is_some() { 2 } else { 1 },
+            "Wrong denomination"
+        );
         let mut issuer = self.issuer(pass.issuer_id);
         require!(
             env::predecessor_account_id() == issuer.authorizer,
@@ -363,7 +398,7 @@ impl QuotaPass {
         );
         require!(pass.pending == 0, "Transfer unresolved");
         require!(
-            pass.next_reservation_seq == seq && pass.available.0 > 0,
+            pass.next_reservation_seq == seq && units > 0 && pass.available.0 >= units,
             "Invalid sequence or exhausted pass"
         );
         require!(
@@ -374,8 +409,8 @@ impl QuotaPass {
         );
         let start = env::storage_usage();
         pass.next_reservation_seq.0 = increment(seq.0);
-        pass.available.0 = subtract(pass.available.0, 1);
-        policy.available.0 = subtract(policy.available.0, 1);
+        pass.available.0 = subtract(pass.available.0, units);
+        policy.available.0 = subtract(policy.available.0, units);
         pass.open = open_increment(pass.open);
         issuer.open = open_increment(issuer.open);
         policy.open = open_increment(policy.open);
@@ -391,10 +426,14 @@ impl QuotaPass {
         self.passes.insert(&token_id, &pass);
         self.policies.insert(&pass.policy_id.0, &policy);
         self.issuers.insert(&pass.issuer_id.0, &issuer);
-        assert_growth(start, 256);
+        if let Some(maximum) = maximum {
+            self.metered_amounts()
+                .insert(&(token_id.clone(), seq.0), &maximum.0);
+        }
+        assert_growth(start, if maximum.is_some() { 352 } else { 256 });
         event(
             "reserve",
-            json!({"token_id": token_id, "seq": seq, "epoch": expected_epoch, "commitment": request_commitment, "policy_id": pass.policy_id, "amount": U128(1)}),
+            json!({"token_id": token_id, "seq": seq, "epoch": expected_epoch, "commitment": request_commitment, "policy_id": pass.policy_id, "amount": U128(units)}),
         );
     }
 
@@ -408,6 +447,10 @@ impl QuotaPass {
         let Some(mut pass) = self.passes.get(&token_id) else {
             return SettlementResult::NoEvidence;
         };
+        require!(
+            self.policy(pass.policy_id).denomination_version == 1,
+            "Wrong denomination"
+        );
         let mut issuer = self.issuer(pass.issuer_id);
         require!(
             env::predecessor_account_id() == issuer.settler,

@@ -288,6 +288,7 @@ impl QuotaPass {
         self.remove_owner_token(owner, id);
         for slot in 0..SETTLEMENT_WINDOW {
             self.settlements.remove(&(id.clone(), slot));
+            self.metered_settlements().remove(&(id.clone(), slot));
         }
         nft_event(
             "nft_burn",

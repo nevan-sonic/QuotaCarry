@@ -49,6 +49,28 @@ export function Playground({account,tokens,connector,onSettled}:{account:string;
     }catch(error){setMessage(error instanceof Error?error.message:'Could not check claim');}
     finally{setBusy(false);}
   }
+  async function signIssuerAction(input:object){
+    if(!connector)throw Error('Connect a wallet first');
+    const intent=await request('/v2/issuer-actions',input) as {method:string;args:object};
+    if(!['create_policy','issue'].includes(intent.method))throw Error('Unexpected issuer action');
+    const {wallet,accounts}=await connector.getConnectedWallet();
+    if(connector.network!=='testnet'||!accounts.some(item=>item.accountId===account))throw Error('Wallet account changed');
+    const result=await wallet.signAndSendTransaction({network:'testnet',signerId:account,receiverId:'quotacarry-fund-7b29e1.testnet',actions:[
+      {type:'FunctionCall',params:{methodName:intent.method,args:intent.args,gas:'30000000000000',deposit:'0'}},
+    ]});
+    const hash=result.transaction.hash;
+    for(let attempt=0;attempt<8;attempt++){
+      const response=await fetch('/api/chain?transaction='+encodeURIComponent(hash)+'&signer='+encodeURIComponent(account));
+      const receipt=await response.json();
+      if(receipt.final){
+        if(!receipt.success)throw Error('Transaction failed. Receipt '+hash);
+        onSettled();
+        return {hash,value:receipt.value as string};
+      }
+      await new Promise(resolve=>setTimeout(resolve,2000));
+    }
+    throw Error('Finality not confirmed. Check receipt '+hash+' before retrying.');
+  }
   async function track(id:string){
     for(let i=0;i<20;i++){
       const result:Job=await request('/v1/jobs/'+id);
@@ -99,7 +121,7 @@ export function Playground({account,tokens,connector,onSettled}:{account:string;
       </form>}
       {session&&tokens.length===0&&<p>No owned NFT is available for inference.</p>}
       {pending.current&&<button type="button" disabled={busy} onClick={()=>void resume()}>Check request status</button>}
-      {session&&<DeveloperConsole key={session} request={request}/>}
+      {session&&<DeveloperConsole key={session} request={request} signIssuerAction={signIssuerAction}/>}
       {!session&&<div><p id="developer-console">Authenticate your wallet to open Developer Console.</p><p id="issuer-studio">Authenticate your wallet to open Issuer Studio.</p></div>}
     </>}
     <p role="status">{message}{job?' '+job.state.replaceAll('_',' '):''}</p>

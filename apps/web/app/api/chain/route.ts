@@ -25,12 +25,16 @@ export async function GET(request: Request) {
       try {
         const outcome = await rpc(endpoint,'tx',{tx_hash:hash,sender_account_id:signer,wait_until:'FINAL'});
         if (outcome.final_execution_status !== 'FINAL') continue;
-        if (outcome.transaction.receiver_id !== contract || outcome.transaction.signer_id !== signer) {
+        if (outcome.transaction.hash !== hash || outcome.transaction.receiver_id !== contract || outcome.transaction.signer_id !== signer) {
           return Response.json({error:'Transaction does not target QuotaCarry'},{status:400});
         }
         const success = Object.hasOwn(outcome.status,'SuccessValue') &&
           !outcome.receipts_outcome.some((receipt:{outcome:{status:object}})=>Object.hasOwn(receipt.outcome.status,'Failure'));
-        return Response.json({final:true,success});
+        let value:unknown=null;
+        if(success&&outcome.status.SuccessValue){
+          try{value=JSON.parse(Buffer.from(outcome.status.SuccessValue,'base64').toString());}catch{/* No JSON return value. */}
+        }
+        return Response.json({final:true,success,value});
       } catch {
         // A pending or unavailable read can be checked again without resending.
       }
