@@ -5,6 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 QC_V2_TOKENS_ENABLED = "0"
+QC_V2_ROUTING_ENABLED = "0"
 QC_INFERENCE_ENABLED = "1"
 QC_CLAIMS_ENABLED = "1"
 QC_POLICY_ID = "2"

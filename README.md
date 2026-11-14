@@ -23,3 +23,6 @@ See the [product and architecture plan](docs/QUOTACARRY_PLAN.md), [Phase 0 risk 
 The frontend reads finalized ownership and credit balances from NEAR testnet and can request a wallet-signed NFT transfer. See the [submission notes and local run instructions](docs/HACKATHON_SUBMISSION.md) for verified evidence and current integration limits.
 
 Public testnet trial claims are gated by the [beta launch budget](docs/PUBLIC_BETA.md).
+# Developer platform preview
+
+The V2 gateway routes NFT-scoped developer requests to vetted issuer adapters. See the [architecture](docs/ARCHITECTURE.md) and [Developer API](docs/DEVELOPER_API.md) for setup, credential management, and Python and JavaScript examples. The public beta continues to use its existing request-credit flow.

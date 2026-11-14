@@ -1,0 +1,86 @@
+openapi: 3.1.0
+info:
+  title: QuotaCarry Developer API preview
+  version: 2.0.0-preview
+security:
+  - DeveloperToken: []
+paths:
+  /v1/models:
+    get:
+      responses:
+        '200':
+          description: Models allowed by the credential and verified issuer adapter
+  /v1/entitlements:
+    get:
+      responses:
+        '200':
+          description: Finalized allowance for the credential's NFT
+  /v1/usage:
+    get:
+      responses:
+        '200':
+          description: Recent jobs and finalized receipt hashes visible to this credential
+  /v1/jobs/{job_id}:
+    parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      responses:
+        '200':
+          description: Job state and output after settlement
+        '404':
+          description: Job unavailable to this credential
+  /v1/chat/completions:
+    post:
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, pattern: '^[-a-zA-Z0-9]{16,64}$'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [model, messages]
+              properties:
+                model: {type: string}
+                stream: {const: false}
+                max_tokens: {const: 256}
+                max_completion_tokens: {const: 256}
+                messages:
+                  type: array
+                  minItems: 1
+                  maxItems: 1
+                  items:
+                    type: object
+                    required: [role, content]
+                    properties:
+                      role: {const: user}
+                      content:
+                        type: string
+                        description: Nonempty prompt of at most 768 UTF-8 bytes
+      responses:
+        '200':
+          description: OpenAI-shaped completion with provider-reported usage after finalized settlement
+        '202':
+          description: Job pending. Repeat the identical request and idempotency key or check the job endpoint.
+        '400':
+          description: Invalid or unsupported request
+        '401':
+          description: Developer credential rejected
+        '403':
+          description: Entitlement or verified adapter unavailable
+        '409':
+          description: Budget, idempotency, or terminal job conflict
+        '429':
+          description: Request rate limit reached
+components:
+  securitySchemes:
+    DeveloperToken:
+      type: http
+      scheme: bearer

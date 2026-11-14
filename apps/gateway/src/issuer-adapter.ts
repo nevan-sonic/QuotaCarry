@@ -1,10 +1,9 @@
-import {createHmac,timingSafeEqual} from 'node:crypto';
+import {timingSafeEqual} from 'node:crypto';
 import type {D1Database} from '@cloudflare/workers-types';
-import {createGroqProvider,ProviderError} from './groq.js';
+import {createGroqCompletion,ProviderError} from './groq.js';
 
-export function adapterSignature(key:string, timestamp:string, nonce:string, body:string) {
-  return createHmac('sha256',key).update(JSON.stringify(['qc-adapter-v1',timestamp,nonce,body])).digest('hex');
-}
+import {adapterSignature} from './adapter-protocol.js';
+export {adapterSignature} from './adapter-protocol.js';
 
 export async function verifyAdapterRequest(db:D1Database,key:string,timestamp:string,nonce:string,body:string,signature:string,now=Date.now()) {
   if(key.length<32||!/^\d{13}$/.test(timestamp)||Math.abs(now-Number(timestamp))>60000||
@@ -36,17 +35,23 @@ export default {
     const timestamp=req.headers.get('X-QC-Timestamp')??'',nonce=req.headers.get('X-QC-Nonce')??'',signature=req.headers.get('X-QC-Signature')??'';
     const key=env.ADAPTER_SHARED_KEY;
     if(!key||!await verifyAdapterRequest(env.DB,key,timestamp,nonce,path+'\n'+body,signature))return respond({error:'Request authentication rejected'},401);
-    if(path==='/v1/verify')return respond({signature:adapterSignature(key,timestamp,nonce,'verify-response\n'+body)},200);
+    if(path==='/v1/verify'){
+      const model=env.ADAPTER_MODEL??'';
+      return respond({model,signature:adapterSignature(key,timestamp,nonce,'verify-response\n'+JSON.stringify([body,model]))},200);
+    }
     if(env.ADAPTER_ENABLED!=='1'||!env.GROQ_API_KEY||!env.ADAPTER_MODEL)return respond({error:'Adapter unavailable'},503);
     let input;
     try{input=JSON.parse(body);}catch{return respond({error:'Invalid JSON'},400);}
-    if(input?.model!==env.ADAPTER_MODEL||typeof input.prompt!=='string'||!input.prompt.trim()||Buffer.byteLength(input.prompt)>768)return respond({error:'Model or prompt rejected'},400);
+    if(input?.model!==env.ADAPTER_MODEL||typeof input.prompt!=='string'||!input.prompt.trim()||Buffer.byteLength(input.prompt)>768||
+      typeof input.job!=='string'||!/^[a-f0-9-]{36}$/.test(input.job))return respond({error:'Model, prompt or job rejected'},400);
     const day=new Date().toISOString().slice(0,10);
     const quota=await env.DB.prepare('INSERT INTO adapter_budget VALUES (?,1) ON CONFLICT(day) DO UPDATE SET used=used+1 WHERE used<4 RETURNING used').bind(day).first();
     if(!quota)return respond({error:'Adapter daily budget exhausted'},429);
+    const admission=await env.DB.prepare('INSERT OR IGNORE INTO adapter_dispatched_jobs VALUES (?,?)').bind(input.job,Date.now()).run();
+    if(admission.meta.changes!==1)return respond({error:'Job already dispatched'},409);
     try {
-      const content=await createGroqProvider(env.GROQ_API_KEY,env.ADAPTER_MODEL)(input.prompt);
-      return respond({model:env.ADAPTER_MODEL,content},200);
+      const result=await createGroqCompletion(env.GROQ_API_KEY,env.ADAPTER_MODEL)(input.prompt);
+      return respond({model:env.ADAPTER_MODEL,...result},200);
     } catch(error) {
       const rejected=error instanceof ProviderError&&error.outcome==='rejected';
       return respond({error:rejected?'Provider rejected request':'Provider outcome uncertain'},rejected?422:502);

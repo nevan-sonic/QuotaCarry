@@ -68,3 +68,43 @@ test('adapter signatures bind the route and reject nonce replay', async () => {
   assert(await verifyAdapterRequest(db,key,time,nonce,body,signature,Number(time)));
   assert(!await verifyAdapterRequest(db,key,time,nonce,body,signature,Number(time)));
 });
+
+test('adapter routing pins the issuer to its own binding and rejects shared slots, keys and redirects', async () => {
+  const {adapterRoute,configuredAdapter,dispatchAdapter,verifyAdapter}=await import('./issuer-routing.js');
+  const {adapterSignature}=await import('./issuer-adapter.js');
+  const calls:string[]=[];
+  const binding=(label:string,key:string)=>({fetch:async(url:string,init:RequestInit)=>{
+    calls.push(label);
+    assert.equal(init.redirect,'manual');
+    const headers=new Headers(init.headers);
+    const path=new URL(url).pathname;
+    assert.equal(new URL(url).hostname,'adapter.internal');
+    const time=headers.get('X-QC-Timestamp')!,nonce=headers.get('X-QC-Nonce')!;
+    assert.equal(headers.get('X-QC-Signature'),adapterSignature(key,time,nonce,path+'\n'+init.body));
+    if(path==='/v1/verify')return Response.json({model:'demo',signature:adapterSignature(key,time,nonce,'verify-response\n'+JSON.stringify([init.body,'demo']))});
+    return label==='A'?Response.json({model:'demo',content:'issuer A',finish_reason:'stop',usage:{prompt_tokens:2,completion_tokens:1,total_tokens:3}}):new Response(null,{status:302,headers:{Location:'http://169.254.169.254/'}});
+  }});
+  const A={issuer:'3',slot:'A',key:'a'.repeat(64)},B={issuer:'4',slot:'B',key:'b'.repeat(64)};
+  type Env=import('./issuer-routing.js').AdapterRegistryEnv;
+  const env={QC_ADAPTER_KEYS:JSON.stringify([A,B]),QC_ADAPTER_A:binding('A',A.key),QC_ADAPTER_B:binding('B',B.key)} as unknown as Env;
+  const a=configuredAdapter(env,'3')!,b=configuredAdapter(env,'4')!;
+  assert.equal(configuredAdapter(env,'2'),null);
+  assert.equal(configuredAdapter({...env,QC_ADAPTER_KEYS:JSON.stringify([A,{...B,slot:A.slot}])},'3'),null);
+  assert.equal(configuredAdapter({...env,QC_ADAPTER_KEYS:JSON.stringify([A,{...B,key:A.key}])},'3'),null);
+  assert(await verifyAdapter(a,'3','demo'));
+  assert(!await verifyAdapter(a,'3','wrong-model'));
+  const db=new DatabaseSync(':memory:');
+  try {
+    for(const name of ['0001_inference.sql','0002_beta.sql','0003_developer_tokens.sql','0004_issuer_adapters.sql']){
+      db.exec(readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
+    }
+    db.prepare('INSERT INTO qc_issuer_adapters VALUES (?,?,?,?,?,?)').run('3','a.testnet',a.revision,'demo',1,0);
+    env.DB={prepare:(sql:string)=>({bind:(...params:string[])=>({first:async()=>db.prepare(sql).get(...params)??null})})} as unknown as Env['DB'];
+    assert(await adapterRoute(env,'3','demo'));
+    assert.equal(await adapterRoute(env,'4','demo'),null);
+    assert.equal(await adapterRoute(env,'3','other-model'),null);
+  }finally{db.close();}
+  assert.equal((await dispatchAdapter(a,'demo','hello','job')).content,'issuer A');
+  await assert.rejects(dispatchAdapter(b,'demo','hello','job'),{outcome:'ambiguous'});
+  assert.deepEqual(calls,['A','A','A','B']);
+});

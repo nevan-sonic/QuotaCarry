@@ -1,10 +1,15 @@
 # QuotaCarry developer API preview
 
-The preview binds each developer credential to a claimed beta NFT, its owner, issuer, policy, ownership epoch, and model. Authenticate with the existing NEP-413 wallet flow, then send the wallet session as a bearer credential to `POST /v2/tokens` with `{"nft":"<token ID>","name":"local integration"}`. The response reveals the developer credential once. List credentials with `GET /v2/tokens` and revoke with `POST /v2/tokens` using `{"revokeId":"<credential ID>"}`.
+The preview binds each developer credential to a V2 NFT, its owner, issuer, policy, ownership epoch, and model. Authenticate with the existing NEP-413 wallet flow, then send the wallet session as a bearer credential to `POST /v2/tokens` with `{"nft":"<token ID>","name":"local integration","model":"openai/gpt-oss-20b","ttlMinutes":60}`. The response reveals the developer credential once. List credentials with `GET /v2/tokens` and revoke with `POST /v2/tokens` using `{"revokeId":"<credential ID>"}`. Times to live range from 5 to 1,440 minutes and default to 1,440.
 
 Credentials expire after 24 hours. D1 stores a hash. The gateway checks finalized ownership and epoch on developer requests and again before reserving. The contract checks the expected epoch during reservation. A transfer invalidates credentials from the old epoch, including if the NFT later returns to the same owner. Work already reserved follows the contract's settlement rules.
 
-Use a developer bearer credential with `GET /v1/models` or `POST /v1/chat/completions`. The latter accepts one user message up to 768 UTF-8 bytes, the credential's model, and a 256-token completion limit. It returns HTTP 202 while the durable job is pending and an OpenAI-shaped completion after finalized settlement. This asynchronous subset requires an HTTP client that handles 202 and repeats the same request body and idempotency key. Stop on terminal errors.
+Use a developer bearer credential with `GET /v1/models`, `GET /v1/entitlements`, `GET /v1/usage`, `GET /v1/jobs/{job_id}`, or `POST /v1/chat/completions`. The usage endpoint lists job states and receipt hashes. Completions accept one user message up to 768 UTF-8 bytes, the credential's model, and a 256-token completion limit. The endpoint returns HTTP 202 while the durable job is pending and an OpenAI-shaped completion after finalized settlement. This asynchronous subset requires an HTTP client that handles 202 and repeats the same request body and idempotency key. Stop on terminal errors.
+
+```sh
+curl --fail-with-body "$QC_GATEWAY/v1/entitlements" \
+  -H "Authorization: Bearer $QC_DEVELOPER_TOKEN"
+```
 
 ## Python
 
@@ -59,15 +64,15 @@ for (let attempt = 0; ; attempt++) {
 }
 ```
 
-Keep the credential in server-side configuration. Persist the idempotency key alongside an application request if it must survive a restart. Use a staging environment with `QC_V2_TOKENS_ENABLED=1` for these examples.
+Keep the credential in server-side configuration. Persist the idempotency key alongside an application request if it must survive a restart. Use a staging environment with both V2 flags enabled and a verified adapter for these examples.
 
 ## Issuer-operated reference adapter
 
 Run these commands from `apps/gateway` in the issuer's own Cloudflare account. Create a D1 database using `wrangler d1 create quotacarry-issuer-adapter` and enter the returned ID in a local copy of `wrangler.adapter.toml`. Apply its separate migrations using `wrangler d1 migrations apply quotacarry-issuer-adapter --remote --config wrangler.adapter.toml`. Set `ADAPTER_SHARED_KEY` (at least 32 random bytes encoded as text) and `GROQ_API_KEY` using `wrangler secret put NAME --config wrangler.adapter.toml`. Deploy using `wrangler deploy --config wrangler.adapter.toml`. Leave `ADAPTER_ENABLED=0` until its Free-tier policy and caller are verified.
 
-The adapter accepts a signed `POST /v1/verify` or `POST /v1/inference`. The HMAC-SHA256 is hex-encoded and computed over the JSON array `["qc-adapter-v1", timestamp, nonce, path + "\n" + rawBody]`. Send it in `X-QC-Signature` with the millisecond timestamp in `X-QC-Timestamp` and a fresh 32-hex-character nonce in `X-QC-Nonce`. Verification returns a proof over the same array with the last value replaced by `"verify-response\n" + rawBody`. Inference accepts a JSON object with `model` and `prompt`. The adapter calls a fixed Groq endpoint and keeps its Groq credential in the issuer's account.
+The adapter accepts a signed `POST /v1/verify` or `POST /v1/inference`. The HMAC-SHA256 is hex-encoded and computed over the JSON array `["qc-adapter-v1", timestamp, nonce, path + "\n" + rawBody]`. Send it in `X-QC-Signature` with the millisecond timestamp in `X-QC-Timestamp` and a fresh 32-hex-character nonce in `X-QC-Nonce`. Verification returns the model and a proof over the same array with the last value replaced by `"verify-response\n" + JSON.stringify([rawBody, model])`. Inference accepts a JSON object with `model`, `prompt`, and the gateway job ID. The adapter calls a fixed Groq endpoint and keeps its Groq credential in its Worker.
 
-The production gateway preview still uses its existing platform provider and beta budgets. Production issuer routing, enrollment, teams, dashboards, and live acceptance remain pending. Routing needs an operator-verified issuer-to-adapter mapping and a durable dispatch record tied to the reservation. An ambiguous dispatch must go to reconciliation.
+The production gateway keeps both preview flags off. [Architecture and issuer setup](ARCHITECTURE.md) describes the vetted deployment pattern and remaining acceptance checks.
 
 ## Contract compatibility
 
