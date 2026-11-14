@@ -1,0 +1,18 @@
+name = "quotacarry-gateway"
+main = "src/worker.ts"
+compatibility_date = "2026-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+QC_INFERENCE_ENABLED = "0"
+QC_ORIGIN = "http://127.0.0.1:3010"
+GROQ_MODEL = "llama-3.1-8b-instant"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "quotacarry"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[triggers]
+crons = ["*/5 * * * *"]

@@ -75,7 +75,7 @@ export function createChain(relayerSecret:string,settlerSecret:string,policyId:s
     return {id:role+'.'+contract,key,publicBytes,publicKey:'ed25519:'+encode(publicBytes)};
   }
   const relayer=signer('relayer',relayerSecret),settler=signer('settler',settlerSecret);
-  async function send(s:typeof relayer,method:string,args:object,kind:Intent['kind'],reservation:Reservation,b:Block,save:(intent:Intent)=>void){
+  async function send(s:typeof relayer,method:string,args:object,kind:Intent['kind'],reservation:Reservation,b:Block,save:(intent:Intent)=>void|Promise<void>){
     if(BigInt(b.gas_price)>400000000n)throw Error('Testnet gas price above configured limit');
     const deployed=await rpc('query',{request_type:'view_account',account_id:contract,block_id:b.hash});
     if(deployed.code_hash!=='2s4ERzW1uRcMksDrDsXVpC9utdH1ytHzRXHCWECoCjrb')throw Error('Unexpected deployed contract code');
@@ -85,7 +85,7 @@ export function createChain(relayerSecret:string,settlerSecret:string,policyId:s
     const digest=sha(tx),hash=encode(digest);
     if(kind==='reserve')reservation.transactionHash=hash;
     const intent={hash,signer:s.id,kind,reservation};
-    save(intent);
+    await save(intent);
     const signed=Buffer.concat([tx,Buffer.from([0]),sign(null,digest,s.key)]);
     try{await rpc('send_tx',{signed_tx_base64:signed.toString('base64'),wait_until:'INCLUDED'},true);}catch{/* Reconcile by hash. */}
     for(let i=0;i<3;i++){
@@ -97,7 +97,7 @@ export function createChain(relayerSecret:string,settlerSecret:string,policyId:s
     throw Error('Transaction outcome requires reconciliation');
   }
   return {
-    async reserve(account:string,tokenId:string,commitment:string,save:(i:Intent)=>void){
+    async reserve(account:string,tokenId:string,commitment:string,save:(i:Intent)=>void|Promise<void>){
       const b=await block();
       const pass=await view('get_allowance',{token_id:tokenId},b);
       if(!pass||pass.owner_id!==account||pass.policy_id!==policyId||BigInt(pass.available)<1n||pass.pending!==0)throw Error('NFT unavailable for this inference policy');
@@ -107,7 +107,7 @@ export function createChain(relayerSecret:string,settlerSecret:string,policyId:s
       await send(relayer,'reserve',{token_id:tokenId,holder_id:account,expected_epoch:pass.epoch,seq:reservation.sequence,request_commitment:commitment,valid_through_height:String(b.height+100)},'reserve',reservation,b,save);
       return reservation;
     },
-    async settle(reservation:Reservation,kind:'consume'|'release',save:(i:Intent)=>void){
+    async settle(reservation:Reservation,kind:'consume'|'release',save:(i:Intent)=>void|Promise<void>){
       const b=await block();
       return send(settler,'settle',{token_id:reservation.tokenId,seq:reservation.sequence,disposition:kind},kind,reservation,b,save);
     },

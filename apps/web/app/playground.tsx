@@ -45,7 +45,7 @@ export function Playground({account,tokens,connector,onSettled}:{account:string;
       }
       await new Promise(resolve=>setTimeout(resolve,1500));
     }
-    setMessage('Request is still processing. Check status again.');
+    setMessage('Request is queued or processing. The Worker checks the queue every five minutes. Check status again.');
   }
   async function submit(event:FormEvent<HTMLFormElement>){
     event.preventDefault();

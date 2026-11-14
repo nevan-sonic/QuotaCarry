@@ -15,3 +15,8 @@ next-env.d.ts
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+.wrangler/
+.open-next/
+.dev.vars
+.dev.vars.*
