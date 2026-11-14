@@ -41,3 +41,30 @@ test('scheduled recovery preserves an interrupted provider reservation without r
     assert.equal(row?.settle_hash,null);
   } finally {db.close();}
 });
+
+test('developer credentials fail closed after transfer, transfer back, expiry or revocation', async () => {
+  const {matchesEntitlement}=await import('./developer-tokens.js');
+  const credential={id:'test',account:'alice.testnet',nft:'5',issuer:'2',policy:'2',epoch:'1',name:'test',model:'model',expires:100,revoked:null};
+  const pass={owner_id:'alice.testnet',issuer_id:'2',policy_id:'2',epoch:'1',available:'1'};
+  assert(matchesEntitlement(credential,pass,50));
+  assert(!matchesEntitlement(credential,{...pass,owner_id:'bob.testnet',epoch:'2'},50));
+  assert(!matchesEntitlement(credential,{...pass,epoch:'3'},50));
+  assert(!matchesEntitlement(credential,{...pass,issuer_id:'3'},50));
+  assert(!matchesEntitlement(credential,pass,100));
+  assert(!matchesEntitlement({...credential,revoked:49},pass,50));
+});
+
+test('adapter signatures bind the route and reject nonce replay', async () => {
+  const {adapterSignature,verifyAdapterRequest}=await import('./issuer-adapter.js');
+  const seen=new Set<string>();
+  const db={prepare:()=>({bind:(nonce:string)=>({run:async()=>{
+    const changes=seen.has(nonce)?0:1;
+    seen.add(nonce);
+    return {meta:{changes}};
+  }})})} as unknown as import('@cloudflare/workers-types').D1Database;
+  const key='a'.repeat(32), time='1700000000000', nonce='b'.repeat(32);
+  const body='/v1/verify\n{}', signature=adapterSignature(key,time,nonce,body);
+  assert(!await verifyAdapterRequest(db,key,time,nonce,'/v1/inference\n{}',signature,Number(time)));
+  assert(await verifyAdapterRequest(db,key,time,nonce,body,signature,Number(time)));
+  assert(!await verifyAdapterRequest(db,key,time,nonce,body,signature,Number(time)));
+});

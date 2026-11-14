@@ -1,0 +1,17 @@
+name = "quotacarry-issuer-adapter"
+main = "src/issuer-adapter.ts"
+compatibility_date = "2026-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ADAPTER_ENABLED = "0"
+ADAPTER_MODEL = "openai/gpt-oss-20b"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "quotacarry-issuer-adapter"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "adapter-migrations"
+
+[triggers]
+crons = ["*/5 * * * *"]

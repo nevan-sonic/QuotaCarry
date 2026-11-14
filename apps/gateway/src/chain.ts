@@ -42,6 +42,9 @@ async function view(method_name:string,args:object,b:Block){
   const result=await rpc('query',{request_type:'call_function',account_id:contract,block_id:b.hash,method_name,args_base64:Buffer.from(JSON.stringify(args)).toString('base64')});
   return JSON.parse(Buffer.from(result.result).toString());
 }
+export async function readEntitlement(token_id:string) {
+  return view('get_allowance',{token_id},await block());
+}
 async function access(account_id:string,public_key:string,b:Block){
   return rpc('query',{request_type:'view_access_key',account_id,public_key,block_id:b.hash});
 }
@@ -123,10 +126,10 @@ export function createChain(relayerSecret:string,settlerSecret:string,policyId:s
       const pass=await view('get_allowance',{token_id:tokenId},await block());
       return Boolean(pass&&pass.owner_id===owner&&pass.policy_id===policyId&&BigInt(pass.available)>0n&&pass.pending===0);
     },
-    async reserve(account:string,tokenId:string,commitment:string,save:(i:Intent)=>void|Promise<void>){
+    async reserve(account:string,tokenId:string,commitment:string,save:(i:Intent)=>void|Promise<void>,expectedEpoch?:string){
       const b=await block();
       const pass=await view('get_allowance',{token_id:tokenId},b);
-      if(!pass||pass.owner_id!==account||pass.policy_id!==policyId||BigInt(pass.available)<1n||pass.pending!==0)throw Error('NFT unavailable for this inference policy');
+      if(!pass||pass.owner_id!==account||(expectedEpoch!==undefined&&pass.epoch!==expectedEpoch)||pass.policy_id!==policyId||BigInt(pass.available)<1n||pass.pending!==0)throw Error('NFT unavailable for this inference policy');
       const issuer=await view('get_issuer',{issuer_id:pass.issuer_id},b);
       if(issuer.authorizer!==relayer.id||issuer.settler!==settler.id||issuer.paused)throw Error('Issuer configuration mismatch');
       const reservation={tokenId,sequence:pass.next_reservation_seq,commitment,transactionHash:''};
