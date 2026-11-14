@@ -156,6 +156,7 @@ async function handle(req:Request,env:Env){
   if(!ready(env))return respond({error:'Inference is not configured'},503);
   const {tokenId,prompt,idempotencyKey}=input;
   if(typeof tokenId!=='string'||!/^\d{1,20}$/.test(tokenId)||typeof prompt!=='string'||!prompt.trim()||prompt.length>4000||typeof idempotencyKey!=='string'||!/^[-a-zA-Z0-9]{16,64}$/.test(idempotencyKey))return respond({error:'Invalid inference request'},400);
+  if(env.QC_POLICY_ID==='1'&&(session.account!=='bob.quotacarry-fund-7b29e1.testnet'||tokenId!=='1'))return respond({error:'Only the approved test NFT can run inference'},403);
   const digest=hash(JSON.stringify([tokenId,prompt]));
   const existing=()=>env.DB.prepare('SELECT * FROM jobs WHERE account=? AND dedupe=?').bind(session.account,idempotencyKey).first<Job>();
   const prior=await existing();
@@ -163,7 +164,7 @@ async function handle(req:Request,env:Env){
   if(!await authorizedKey(session.account,session.public_key))return respond({error:'Wallet key revoked'},401);
   const id=randomUUID();
   const insert=await env.DB.prepare("INSERT OR IGNORE INTO jobs(id,account,dedupe,digest,token,prompt,state,created,lease) SELECT ?,?,?,?,?,?,'queued',?,? WHERE (SELECT COUNT(*) FROM jobs WHERE created>?) < 1")
-    .bind(id,session.account,idempotencyKey,digest,tokenId,prompt,now,0,now-86400000).run();
+    .bind(id,session.account,idempotencyKey,digest,tokenId,prompt,now,0,env.QC_POLICY_ID=== '1' ? 0 : now-86400000).run();
   if(insert.meta.changes!==1){
     const concurrent=await existing();
     return concurrent?.digest===digest?respond(publicJob(concurrent)):respond({error:'Inference busy, daily limit reached, or reconciliation required'},409);

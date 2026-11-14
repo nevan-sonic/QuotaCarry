@@ -76,7 +76,7 @@ export function createChain(relayerSecret:string,settlerSecret:string,policyId:s
   }
   const relayer=signer('relayer',relayerSecret),settler=signer('settler',settlerSecret);
   async function send(s:typeof relayer,method:string,args:object,kind:Intent['kind'],reservation:Reservation,b:Block,save:(intent:Intent)=>void|Promise<void>){
-    if(BigInt(b.gas_price)>400000000n)throw Error('Testnet gas price above configured limit');
+    if(BigInt(b.gas_price)>(policyId==='1'?100000000n:400000000n))throw Error('Testnet gas price above configured limit');
     const deployed=await rpc('query',{request_type:'view_account',account_id:contract,block_id:b.hash});
     if(deployed.code_hash!=='2s4ERzW1uRcMksDrDsXVpC9utdH1ytHzRXHCWECoCjrb')throw Error('Unexpected deployed contract code');
     const k=await access(s.id,s.publicKey,b);

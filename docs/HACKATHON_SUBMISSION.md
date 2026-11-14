@@ -32,7 +32,7 @@ Install workspace packages with `npm ci`. Run `npm run lint`, `npm run typecheck
 
 The frontend reads snapshots from finalized testnet RPC with read-only failover, refreshes every 20 seconds, and checks the final receipt after a wallet transfer. The local production API returned the expected token state and independently resolved the historical transfer. An app-initiated wallet transfer still needs a live browser test with a separately approved transaction.
 
-The authenticated gateway and playground are implemented. The frontend and gateway are deployed on Cloudflare Workers. Live inference verification is pending.
+The authenticated gateway and playground are implemented. The frontend and gateway are deployed on Cloudflare Workers. One production inference run is verified below.
 
 ## Gateway deployment and recovery
 
@@ -40,7 +40,7 @@ The gateway exposes /health for process liveness and /ready for configuration st
 
 The wallet signs a NEP-413 challenge bound to the frontend domain, testnet, inference action and a two-minute nonce. The gateway verifies the finalized account key and stores a hash of the short-lived bearer token. A unique job per token and a single active worker serialize requests. The provider call occurs after finalized reservation verification. The worker records a transaction hash before each broadcast and reconciles ambiguous sends by read-only hash queries. On restart it can resume a settlement that was durably selected and had no settlement hash. A reserved job interrupted before or during provider execution can require operator reconciliation. Resolve ambiguous provider outcomes before releasing credits. Keep one worker instance to preserve signer nonce ordering.
 
-Live Groq and wallet integration verification remain pending. Issuer 0 has no remaining mint capacity. Preserve the historical NFT and obtain separate authorization for any testnet writes used to verify the deployment.
+Live Groq verification succeeded. Browser wallet signing remains pending. Issuer 0 has no remaining mint capacity. Preserve the historical NFT and obtain separate authorization for any testnet writes used to verify the deployment.
 
 ```mermaid
 flowchart LR
@@ -55,3 +55,26 @@ flowchart LR
 ```
 
 Deploy the web workspace as a Next.js server and the gateway as a single Node process behind HTTPS. Use the repository Node pin, build from the monorepo root, set GATEWAY_HOST to the private interface exposed to the HTTPS proxy, and mount a persistent private directory for QC_DB. Verify both health routes and an authenticated testnet request before announcing a live URL. Keep backups and restrict access to the database and signer secrets.
+
+## Verified production inference
+
+On November 14, 2026 the public Cloudflare gateway completed one free Groq request with `openai/gpt-oss-20b` and a 512-completion-token cap. The NEP-413 proof was signed by Bob's real testnet key using the local signer. The gateway accepted it and rejected nonce replay. Browser wallet signing was outside that verification.
+
+Prompt: “In one short sentence, explain why a transferable credit is different from sharing an API key.”
+
+> A transferable credit is a movable unit of value that can be passed between accounts, while sharing an API key gives direct, credential-level access to the system.
+
+Production D1 job `782dc845-ae18-448d-a14f-56e936e7ebcd` completed. The scheduled Worker finalized the reservation before invoking Groq and finalized consumption before returning the response. Inference was disabled after this single authorized request.
+
+| Action | Finalized NEAR testnet receipt |
+|---|---|
+| Register issuer 1 | [8BLiycS…](https://explorer.testnet.near.org/transactions/8BLiycSVucobeoycdv6tWtMB9xFnuSA1LZr1cpKLQ2cD) |
+| Create policy 1 | [2nDaQgP…](https://explorer.testnet.near.org/transactions/2nDaQgPGe5uXDfs1d9MjKYqNRLpXDP43Ui3YHkTanSRN) |
+| Mint token 1 to Alice | [6gbCUQ4…](https://explorer.testnet.near.org/transactions/6gbCUQ44dVQjLuFsF9Ztq97YgivmCpD7aARjUY6wb9SQ) |
+| Transfer token 1 to Bob | [BAEkip9…](https://explorer.testnet.near.org/transactions/BAEkip9bsg4oNseLdKsGGMw1CWbqgBuDFP25UPKZHVSe) |
+| Reserve sequence 0 for Bob | [6T5r6ke…](https://explorer.testnet.near.org/transactions/6T5r6kekc3tBNW3Dvd2bCdj7ytKByYFEA2iqaoDr9axL) |
+| Consume sequence 0 | [9DdoWEF…](https://explorer.testnet.near.org/transactions/9DdoWEFv4hpfdU7Vqvom7Vg4Ge7uqF3t7WvCxZbxwwsM) |
+
+At finalized block 277634713, Bob owned token 1 at epoch 1 and policy 1 conserved one issued credit as zero available, zero open and one consumed. Historical token 0 was unchanged. Fees totaled 0.0015959326134594 NEAR. Deposits totaled 0.060000000000000000000001 NEAR. Aggregate spending was 0.061595932613459400000001 NEAR.
+
+For the recording, show the completed production response as verified historical evidence alongside the reservation and consumption receipts. Use the public dashboard for current finalized state. Interrupted signed-job recovery still needs a dedicated test.

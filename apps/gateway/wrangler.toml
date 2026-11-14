@@ -5,6 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 QC_INFERENCE_ENABLED = "0"
+QC_POLICY_ID = "1"
 QC_ORIGIN = "https://quotacarry-web.quotacarry.workers.dev"
 GROQ_MODEL = "openai/gpt-oss-20b"
 
