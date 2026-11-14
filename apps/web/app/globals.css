@@ -1,8 +1,29 @@
 @import "tailwindcss";
-
-body {
-  min-height: 100vh;
-  background: #101a1d;
-  color: #f1f5f9;
-  font-family: Inter, system-ui, sans-serif;
-}
+:root{color-scheme:dark}
+body{margin:0;background:#091114;color:#edf5f2;font-family:Inter,system-ui,sans-serif}
+.shell{max-width:1120px;margin:auto;padding:0 24px}
+header,footer,.section-title,.links{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap}
+header,footer{padding:22px 0;border-bottom:1px solid #263c39}
+nav{display:flex;gap:24px}
+a{color:#96f0c7;text-decoration:none}
+a:hover{text-decoration:underline}
+.brand{font-size:1.25rem;font-weight:750}
+.hero{padding:clamp(64px,11vw,132px) 0 66px;background:radial-gradient(ellipse at 75% 40%,#12352b 0,transparent 54%)}
+.hero h1{font-size:clamp(3rem,8vw,6.5rem);letter-spacing:-.075em;line-height:.98;max-width:900px;margin:16px 0 25px}
+.hero em{color:#96f0c7;font-style:normal}
+.hero>p:not(.eyebrow){font-size:1.12rem;max-width:580px}
+p,small{color:#b3c9c0;line-height:1.55}
+.eyebrow,.mono{font-family:monospace;overflow-wrap:anywhere}
+.eyebrow{color:#96f0c7;letter-spacing:.13em;font-size:.8rem}
+.links{justify-content:flex-start;margin:16px 0}
+button,.primary{background:#96f0c7;color:#092019;border-radius:8px;border:0;padding:10px 15px;font-weight:700;cursor:pointer}
+button:disabled{opacity:.5;cursor:wait}
+section{margin-bottom:28px}
+.card{background:#111f22;border:1px solid #2a423d;border-radius:16px;padding:clamp(16px,4vw,32px);margin-top:16px}
+h2{font-size:1.75rem;font-weight:700}h3{font-size:1.4rem;font-weight:700}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:12px;margin:20px 0}
+.metrics div{padding:12px;background:#0b1618;border-radius:8px}
+dt{color:#b3c9c0;font-size:.85rem}dd{font-size:1.8rem;font-weight:700;margin:0}
+form{margin-top:20px}input{padding:10px;border:1px solid #57736b;border-radius:8px;background:#091114}
+:focus-visible{outline:2px solid #96f0c7;outline-offset:4px}
+footer{border-bottom:0;border-top:1px solid #263c39;color:#b3c9c0}

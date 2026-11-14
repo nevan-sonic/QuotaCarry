@@ -17,3 +17,7 @@ The [testnet deployment manifest](docs/TESTNET_DEPLOYMENT.md) records the review
 Gateway configuration is optional and documented in `.env.example`. Set values in the process environment. Never enter provider API keys in chat, browser storage or Git. Later stages will use dedicated provider projects and managed secrets. Browser imports may use the public DTO and SDK workspaces. The gateway remains a private application, with no browser export.
 
 See the [product and architecture plan](docs/QUOTACARRY_PLAN.md), [Phase 0 risk ADR](docs/ADR-0001-FOUNDATION.md) and [verification report](docs/PHASE_0_VERIFICATION.md). The MIT license is the default repository license.
+
+## Testnet application
+
+The frontend reads finalized ownership and credit balances from NEAR testnet and can request a wallet-signed NFT transfer. See the [submission notes and local run instructions](docs/HACKATHON_SUBMISSION.md) for verified evidence and current integration limits.
