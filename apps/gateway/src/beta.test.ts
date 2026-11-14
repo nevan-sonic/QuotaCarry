@@ -2,6 +2,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import type {Intent} from './chain.js';
 
 test('team roles do not grant owner or administrator escalation', async () => {
   const {canManageTeam,canManageAdapter}=await import('./teams.js');
@@ -102,6 +103,69 @@ test('adapter signatures bind the route and reject nonce replay', async () => {
   assert(!await verifyAdapterRequest(db,key,time,nonce,'/v1/inference\n{}',signature,Number(time)));
   assert(await verifyAdapterRequest(db,key,time,nonce,body,signature,Number(time)));
   assert(!await verifyAdapterRequest(db,key,time,nonce,body,signature,Number(time)));
+});
+
+test('two isolated issuer jobs reserve before dispatch and settle their own balances', async()=>{
+  const {recover}=await import('./worker.js');
+  const {configuredAdapter}=await import('./issuer-routing.js');
+  const db=new DatabaseSync(':memory:');
+  try{
+    for(const migration of ['0001_inference','0002_beta','0003_developer_tokens','0004_issuer_adapters']){
+      db.exec(readFileSync(new URL('../migrations/'+migration+'.sql',import.meta.url),'utf8'));
+    }
+    const prepare=(sql:string,values:(string|number|null)[]=[])=>({
+      bind:(...args:(string|number|null)[])=>prepare(sql,args),
+      first:async()=>db.prepare(sql).get(...values)??null,
+      run:async()=>({meta:{changes:Number(db.prepare(sql).run(...values).changes)}}),
+    });
+    const events:string[]=[];
+    const adapter=(issuer:string)=>({fetch:async()=>{
+      assert.equal(events.at(-1),'reserve:'+issuer);
+      events.push('dispatch:'+issuer);
+      return Response.json({model:'demo',content:'fixture '+issuer,finish_reason:'stop',usage:{prompt_tokens:1,completion_tokens:1,total_tokens:2}});
+    }});
+    const env={DB:{prepare,batch:async(statements:ReturnType<typeof prepare>[])=>Promise.all(statements.map(s=>s.run()))},
+      QC_POLICY_ID:'2',QC_RELAYER_KEY:'fixture',QC_SETTLER_KEY:'fixture',QC_V2_TOKENS_ENABLED:'1',QC_V2_ROUTING_ENABLED:'1',
+      QC_ADAPTER_KEYS:JSON.stringify([{issuer:'3',slot:'A',key:'a'.repeat(64)},{issuer:'4',slot:'B',key:'b'.repeat(64)}]),
+      QC_ADAPTER_A:adapter('3'),QC_ADAPTER_B:adapter('4')} as unknown as Parameters<typeof recover>[0];
+    const balances=new Map([['3',2],['4',2]]);
+    const deps={
+      readEntitlement:async(id:string)=>({owner_id:'recipient'+id+'.testnet',issuer_id:id,policy_id:id,epoch:'1',available:String(balances.get(id))}),
+      chain:(_env:unknown,policy?:string)=>({
+        eligible:async()=>true,issue:async()=>{throw Error('Unexpected issue');},
+        reserve:async(owner:string,token:string,commitment:string,save:(value:Intent)=>void|Promise<void>,epoch?:string,issuer?:string)=>{
+          assert.equal(owner,'recipient'+token+'.testnet');assert.equal(epoch,'1');assert.equal(issuer,policy);
+          balances.set(token,balances.get(token)!-1);
+          const reservation={tokenId:token,sequence:'0',commitment,transactionHash:'reserve-'+token};
+          await save({kind:'reserve',hash:reservation.transactionHash,reservation,signer:'fixture'});
+          events.push('reserve:'+token);
+          return reservation;
+        },
+        settle:async(reservation:Intent['reservation'],kind:'consume'|'release',save:(value:Intent)=>void|Promise<void>)=>{
+          assert.equal(kind,'consume');assert.equal(events.at(-1),'dispatch:'+reservation.tokenId);
+          events.push('consume:'+reservation.tokenId);
+          const hash='settle-'+reservation.tokenId;
+          await save({kind,hash,reservation,signer:'fixture'});
+          return hash;
+        },
+      }),
+    };
+    for(const id of ['3','4']){
+      const route=configuredAdapter(env,id)!;
+      db.prepare('INSERT INTO qc_issuer_adapters VALUES (?,?,?,?,?,?)').run(id,'issuer'+id+'.testnet',route.revision,'demo',1,0);
+      const owner='recipient'+id+'.testnet';
+      db.prepare('INSERT INTO qc_developer_tokens(digest,id,account,nft,issuer,policy,epoch,name,model,expires) VALUES (?,?,?,?,?,?,?,?,?,?)').run('digest'+id,'cred'+id,owner,id,id,id,'1','fixture','demo',Date.now()+60000);
+      db.prepare("INSERT INTO jobs(id,account,dedupe,digest,token,prompt,state,created,lease,developer_token_id,issuer,adapter_revision) VALUES (?,?,?,?,?,?,'queued',?,0,?,?,?)")
+        .run(id,owner,id,id,id,'prompt',Date.now(),'cred'+id,id,route.revision);
+      await recover(env,Date.now(),deps);
+      const result=db.prepare('SELECT state,output,reserve_hash,settle_hash FROM jobs WHERE id=?').get(id)!;
+      assert.equal(result.state,'completed');assert.equal(result.reserve_hash,'reserve-'+id);assert.equal(result.settle_hash,'settle-'+id);
+      assert.equal(JSON.parse(String(result.output)).content,'fixture '+id);
+    }
+    await recover(env,Date.now()+600000,deps);
+    assert.deepEqual(events,['reserve:3','dispatch:3','consume:3','reserve:4','dispatch:4','consume:4']);
+    assert.deepEqual([...balances.values()],[1,1]);
+  }finally{db.close();}
 });
 
 test('adapter routing pins the issuer to its own binding and rejects shared slots, keys and redirects', async () => {

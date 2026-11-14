@@ -41,7 +41,8 @@ function persist(env:Env,id:string,intent:Intent){
   const field=intent.kind==='reserve'?'reserve_hash':'settle_hash';
   return env.DB.prepare('UPDATE jobs SET intent=?,'+field+'=? WHERE id=?').bind(JSON.stringify(intent),intent.hash,id).run().then(()=>undefined);
 }
-async function run(env:Env,job:Job,prompt:string){
+const execution={chain,readEntitlement};
+async function run(env:Env,job:Job,prompt:string,dependencies:typeof execution){
   const {id,account:owner,token,developer_token_id:developerTokenId}=job;
   try{
     let policy=env.QC_POLICY_ID!;
@@ -50,13 +51,13 @@ async function run(env:Env,job:Job,prompt:string){
     if(developerTokenId){
       const credential=await env.DB.prepare('SELECT * FROM qc_developer_tokens WHERE id=?').bind(developerTokenId).first<NonNullable<Awaited<ReturnType<typeof readDeveloperToken>>>>();
       if(!routingEnabled(env)||!credential||credential.account!==owner||credential.nft!==token||credential.issuer!==job.issuer||
-        !matchesEntitlement(credential,await readEntitlement(token)))throw Error('Developer credential expired or entitlement changed');
+        !matchesEntitlement(credential,await dependencies.readEntitlement(token)))throw Error('Developer credential expired or entitlement changed');
       route=await adapterRoute(env,credential.issuer,credential.model);
       if(!route||route.row.revision!==job.adapter_revision)throw Error('Issuer adapter changed');
       epoch=credential.epoch;
       policy=credential.policy;
     }
-    const service=chain(env,policy);
+    const service=dependencies.chain(env,policy);
     const reservation=await service.reserve(owner,token,hash(id),intent=>persist(env,id,intent),epoch,job.issuer??undefined);
     await env.DB.prepare("UPDATE jobs SET state='calling_provider',prompt=NULL WHERE id=?").bind(id).run();
     let output:string|null=null;
@@ -85,7 +86,7 @@ async function run(env:Env,job:Job,prompt:string){
     console.warn(JSON.stringify({event:'inference_interrupted',job:id}));
   }
 }
-export async function recover(env:Env,now=Date.now()){
+export async function recover(env:Env,now=Date.now(),dependencies=execution){
   await env.DB.batch([
     env.DB.prepare('DELETE FROM challenges WHERE expires<=?').bind(now),
     env.DB.prepare('DELETE FROM sessions WHERE expires<=?').bind(now),
@@ -103,7 +104,7 @@ export async function recover(env:Env,now=Date.now()){
   if(job.state==='queued'&&job.prompt!==null){
     if(job.developer_token_id?!routingEnabled(env):!ready(env))return;
     await state(env,job.id,'reserving');
-    await run(env,job,job.prompt);
+    await run(env,job,job.prompt,dependencies);
     return;
   }
   if(job.state==='calling_provider'||!job.intent){
