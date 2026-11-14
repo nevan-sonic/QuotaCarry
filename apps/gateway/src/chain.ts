@@ -48,11 +48,18 @@ async function access(account_id:string,public_key:string,b:Block){
 export async function authorizedKey(account:string,key:string){
   return (await access(account,key,await block())).permission==='FullAccess';
 }
-export type Intent={hash:string;signer:string;kind:'reserve'|'consume'|'release';reservation:Reservation};
+export type Intent={hash:string;signer:string;kind:'reserve'|'consume'|'release'|'issue';reservation:Reservation};
 export async function finalized(intent:Intent){
   const value=await rpc('tx',{tx_hash:intent.hash,sender_account_id:intent.signer,wait_until:'FINAL'});
   if(value.final_execution_status!=='FINAL'||value.transaction.hash!==intent.hash||value.transaction.signer_id!==intent.signer||value.transaction.receiver_id!==contract)throw Error('Finality unavailable');
   if(!Object.hasOwn(value.status,'SuccessValue'))return {success:false};
+  if(intent.kind==='issue'){
+    const tokenId:unknown=JSON.parse(Buffer.from(value.status.SuccessValue,'base64').toString());
+    if(typeof tokenId!=='string'||!/^\d+$/.test(tokenId))throw Error('Mint did not return a token ID');
+    const pass=await view('get_allowance',{token_id:tokenId},await block());
+    if(pass?.owner_id!==intent.reservation.commitment||pass.policy_id!==intent.reservation.sequence||pass.available!=='2')throw Error('Mint result mismatch');
+    return {success:true,tokenId};
+  }
   const b=await block();
   const actual=await view('get_reservation',{token_id:intent.reservation.tokenId,seq:intent.reservation.sequence},b);
   if(intent.kind==='reserve'){
@@ -63,7 +70,7 @@ export async function finalized(intent:Intent){
   }
   return {success:true};
 }
-export function createChain(relayerSecret:string,settlerSecret:string,policyId:string){
+export function createChain(relayerSecret:string,settlerSecret:string,policyId:string,issuerSecret?:string){
   function signer(role:string,secret:string){
     if(!secret.startsWith('ed25519:'))throw Error('Invalid signer configuration');
     const bytes=base58(secret.slice(8),90);
@@ -76,10 +83,14 @@ export function createChain(relayerSecret:string,settlerSecret:string,policyId:s
   }
   const relayer=signer('relayer',relayerSecret),settler=signer('settler',settlerSecret);
   async function send(s:typeof relayer,method:string,args:object,kind:Intent['kind'],reservation:Reservation,b:Block,save:(intent:Intent)=>void|Promise<void>){
-    if(BigInt(b.gas_price)>(policyId==='1'?100000000n:400000000n))throw Error('Testnet gas price above configured limit');
+    if(BigInt(b.gas_price)>100000000n)throw Error('Testnet gas price above configured limit');
     const deployed=await rpc('query',{request_type:'view_account',account_id:contract,block_id:b.hash});
     if(deployed.code_hash!=='2s4ERzW1uRcMksDrDsXVpC9utdH1ytHzRXHCWECoCjrb')throw Error('Unexpected deployed contract code');
-    const k=await access(s.id,s.publicKey,b);
+    const [k,balance]=await Promise.all([
+      access(s.id,s.publicKey,b),
+      rpc('query',{request_type:'view_account',account_id:s.id,block_id:b.hash}),
+    ]);
+    if(BigInt(balance.amount)-BigInt(balance.storage_usage)*10000000000000000000n<12800000000000000000000n)throw Error('Signer balance below fee allowance');
     if(k.permission!=='FullAccess')throw Error('Signer key mismatch');
     const tx=Buffer.concat([string(s.id),Buffer.from([0]),s.publicBytes,integer(BigInt(k.nonce)+1n,8),string(contract),base58(b.hash),integer(1n,4),Buffer.from([2]),string(method),string(JSON.stringify(args)),integer(30000000000000n,8),integer(0n,16)]);
     const digest=sha(tx),hash=encode(digest);
@@ -97,6 +108,21 @@ export function createChain(relayerSecret:string,settlerSecret:string,policyId:s
     throw Error('Transaction outcome requires reconciliation');
   }
   return {
+    async issue(owner:string,save:(i:Intent)=>Promise<void>){
+      if(!issuerSecret)throw Error('Issuer signer unavailable');
+      const b=await block();
+      const policy=await view('get_policy',{policy_id:policyId},b);
+      if(!policy||policy.suspended||policy.lifetime_cap!=='20'||BigInt(policy.issued)>18n)throw Error('Trial policy unavailable');
+      const issuer=await view('get_issuer',{issuer_id:policy.issuer_id},b);
+      const controller=signer('issuer',issuerSecret);
+      if(!issuer||issuer.paused||issuer.lifetime_cap!=='20'||issuer.controller!==controller.id)throw Error('Trial issuer mismatch');
+      const intent={tokenId:'',sequence:policyId,commitment:owner,transactionHash:''};
+      return send(controller,'issue',{policy_id:policyId,receiver_id:owner,amount:'2',expected_issue_seq:issuer.next_issue_seq},'issue',intent,b,save);
+    },
+    async eligible(owner:string,tokenId:string){
+      const pass=await view('get_allowance',{token_id:tokenId},await block());
+      return Boolean(pass&&pass.owner_id===owner&&pass.policy_id===policyId&&BigInt(pass.available)>0n&&pass.pending===0);
+    },
     async reserve(account:string,tokenId:string,commitment:string,save:(i:Intent)=>void|Promise<void>){
       const b=await block();
       const pass=await view('get_allowance',{token_id:tokenId},b);

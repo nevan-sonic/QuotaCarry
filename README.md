@@ -21,3 +21,5 @@ See the [product and architecture plan](docs/QUOTACARRY_PLAN.md), [Phase 0 risk 
 ## Testnet application
 
 The frontend reads finalized ownership and credit balances from NEAR testnet and can request a wallet-signed NFT transfer. See the [submission notes and local run instructions](docs/HACKATHON_SUBMISSION.md) for verified evidence and current integration limits.
+
+Public testnet trial claims are gated by the [beta launch budget](docs/PUBLIC_BETA.md).

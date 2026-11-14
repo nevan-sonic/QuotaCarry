@@ -6,6 +6,6 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "start": "node dist/main.js",
-    "test": "npm run build && node --test dist/server.test.js dist/inference.test.js"
+    "test": "npm run build && node --test dist/server.test.js dist/inference.test.js dist/beta.test.js"
   }
 }

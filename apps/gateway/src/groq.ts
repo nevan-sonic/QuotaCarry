@@ -13,7 +13,7 @@ export function createGroqProvider(apiKey: string, model: string, request: typeo
       response = await request('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {Authorization: 'Bearer '+apiKey, 'Content-Type': 'application/json'},
-        body: JSON.stringify({model, messages:[{role:'user',content:prompt}], max_completion_tokens:512}),
+        body: JSON.stringify({model, messages:[{role:'user',content:prompt}], max_completion_tokens:256}),
         signal: AbortSignal.timeout(15000),
       });
     } catch {

@@ -2,11 +2,13 @@
 import {useState,useRef,type FormEvent} from 'react';
 import type {NearConnector} from '@hot-labs/near-connect';
 
+type ClaimStatus={enabled:boolean;eligible:boolean;remaining:number;claim?:{state:string;tx_hash?:string;token?:string}};
 type Job={id:string;state:string;reservation?:string;settlement?:string;output?:string};
 const explorer='https://explorer.testnet.near.org/transactions/';
 const gateway=process.env.NEXT_PUBLIC_QC_GATEWAY;
 
 export function Playground({account,tokens,connector,onSettled}:{account:string;tokens:string[];connector:NearConnector|null;onSettled:()=>void}){
+  const [claim,setClaim]=useState<ClaimStatus>();
   const [session,setSession]=useState('');
   const [job,setJob]=useState<Job>();
   const [message,setMessage]=useState('');
@@ -31,8 +33,19 @@ export function Playground({account,tokens,connector,onSettled}:{account:string;
       const proof=await wallet.signMessage({network:'testnet',signerId:account,message:challenge.message,recipient:challenge.audience,nonce:Uint8Array.from(atob(challenge.nonce),c=>c.charCodeAt(0))});
       if(proof.accountId!==account)throw Error('Wallet proof account mismatch');
       const result=await request('/v1/session',{...proof,nonce:challenge.nonce},'');
-      setSession(result.token);setMessage('Wallet authenticated for five minutes.');
+      setSession(result.token);
+      setClaim(await request('/v1/claim',undefined,result.token));
+      setMessage('Wallet authenticated for five minutes.');
     }catch(error){setMessage(error instanceof Error?error.message:'Wallet authentication failed');}
+    finally{setBusy(false);}
+  }
+  async function checkClaim(create:boolean){
+    setBusy(true);
+    try{
+      const result:ClaimStatus=await request('/v1/claim',create?{}:undefined);
+      setClaim(result);
+      if(result.claim?.state==='completed')onSettled();
+    }catch(error){setMessage(error instanceof Error?error.message:'Could not check claim');}
     finally{setBusy(false);}
   }
   async function track(id:string){
@@ -64,14 +77,23 @@ export function Playground({account,tokens,connector,onSettled}:{account:string;
     finally{setBusy(false);}
   }
   return <section className="card" aria-labelledby="playground-title">
-    <h2 id="playground-title">AI playground</h2><p>One credit per successfully settled response.</p>
+    <h2 id="playground-title">AI playground</h2><p>One credit per successfully settled response. Prompts are limited to 768 UTF-8 bytes.</p>
     {!gateway?<p>Inference gateway · Not configured</p>:!account?<p>Connect a testnet wallet to authenticate.</p>:<>
       <button type="button" disabled={busy} onClick={()=>void authenticate()}>{session?'Renew wallet authentication':'Authenticate wallet'}</button>
+      {session&&claim&&<section aria-label="Claim trial NFT">
+        <h3>Claim a trial NFT</h3>
+        <p>Two testnet credits. One claim per wallet. {claim.remaining} unallocated slots.</p>
+        {!claim.enabled&&<p>Claims are closed.</p>}
+        {claim.eligible&&<button type="button" disabled={busy} onClick={()=>void checkClaim(true)}>Claim trial NFT</button>}
+        {claim.claim&&<p>Claim {claim.claim.state}{claim.claim.token?' · NFT '+claim.claim.token:''}
+          {claim.claim.tx_hash&&<> · <a href={explorer+claim.claim.tx_hash}>Mint receipt</a></>}</p>}
+        <button type="button" disabled={busy} onClick={()=>void checkClaim(false)}>Refresh claim status</button>
+      </section>}
       {session&&tokens.length>0&&<form onSubmit={event=>void submit(event)}>
         <label htmlFor="infer-token">QuotaCarry NFT</label>{' '}
         <select id="infer-token" name="token">{tokens.map(token=><option key={token} value={token}>{token}</option>)}</select>
         <label htmlFor="infer-prompt" style={{display:'block'}}>Prompt</label>
-        <textarea id="infer-prompt" name="prompt" required maxLength={4000} rows={4} style={{width:'100%'}}/>
+        <textarea id="infer-prompt" name="prompt" required maxLength={768} rows={4} style={{width:'100%'}}/>
         <button disabled={busy||Boolean(pending.current)}>Run inference</button>
       </form>}
       {session&&tokens.length===0&&<p>No owned NFT is available for inference.</p>}

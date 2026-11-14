@@ -3,11 +3,14 @@ import type {D1Database,ExecutionContext} from '@cloudflare/workers-types';
 import {authorizedKey,createChain,finalized,type Intent} from './chain.js';
 import {createChallenge,verifyNearMessage} from './near-message.js';
 import {createGroqProvider,ProviderError} from './groq.js';
+import {claimStatus,enqueueClaim,recoverClaim} from './claims.js';
 
 interface Env {
   DB:D1Database;
   QC_ORIGIN?:string;
   QC_POLICY_ID?:string;
+  QC_CLAIMS_ENABLED?:string;
+  QC_ISSUER_KEY?:string;
   GROQ_MODEL?:string;
   GROQ_API_KEY?:string;
   QC_RELAYER_KEY?:string;
@@ -18,9 +21,11 @@ type Job={id:string;account:string;token:string;state:string;prompt:string|null;
 const leaseMs=300000;
 const hash=(input:string)=>createHash('sha256').update(input).digest('hex');
 const account=/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
-const ready=(env:Env)=>Boolean(env.QC_INFERENCE_ENABLED==='1'&&env.DB&&env.QC_ORIGIN&&env.GROQ_MODEL&&env.GROQ_API_KEY&&env.QC_RELAYER_KEY&&env.QC_SETTLER_KEY&&/^\d{1,20}$/.test(env.QC_POLICY_ID??''));
+const ready=(env:Env)=>Boolean(env.QC_INFERENCE_ENABLED==='1'&&env.DB&&env.QC_ORIGIN&&env.GROQ_MODEL&&env.GROQ_API_KEY&&env.QC_RELAYER_KEY&&env.QC_SETTLER_KEY&&betaPolicy(env));
 const publicJob=(j:Job)=>({id:j.id,token:j.token,state:j.state,reservation:j.reserve_hash,settlement:j.settle_hash,output:j.state==='completed'?j.output:null});
-function chain(env:Env){return createChain(env.QC_RELAYER_KEY!,env.QC_SETTLER_KEY!,env.QC_POLICY_ID!);}
+function betaPolicy(env:Env){return /^[0-9]{1,20}$/.test(env.QC_POLICY_ID??'')&&!['0','1'].includes(env.QC_POLICY_ID??'');}
+function claimsEnabled(env:Env){return env.QC_CLAIMS_ENABLED==='1'&&betaPolicy(env)&&Boolean(env.QC_ISSUER_KEY&&env.QC_RELAYER_KEY&&env.QC_SETTLER_KEY);}
+function chain(env:Env){return createChain(env.QC_RELAYER_KEY!,env.QC_SETTLER_KEY!,env.QC_POLICY_ID!,env.QC_ISSUER_KEY);}
 function row(env:Env,id:string){return env.DB.prepare('SELECT * FROM jobs WHERE id=?').bind(id).first<Job>();}
 function state(env:Env,id:string,status:string,output:string|null=null){
   return env.DB.prepare("UPDATE jobs SET state=?,output=?,prompt=CASE WHEN ? IN ('completed','released','rejected','manual_review') THEN NULL ELSE prompt END WHERE id=?").bind(status,output,status,id).run();
@@ -60,12 +65,17 @@ export async function recover(env:Env,now=Date.now()){
     env.DB.prepare('DELETE FROM sessions WHERE expires<=?').bind(now),
     env.DB.prepare('DELETE FROM limits WHERE expires<=?').bind(now),
   ]);
-  if(!ready(env))return;
+  if(betaPolicy(env)&&env.QC_ISSUER_KEY&&env.QC_RELAYER_KEY&&env.QC_SETTLER_KEY){
+    try{await recoverClaim(env.DB,()=>chain(env),claimsEnabled(env),now);}
+    catch{console.warn(JSON.stringify({event:'claim_reconciliation_pending'}));}
+  }
+  if(!betaPolicy(env)||!env.QC_RELAYER_KEY||!env.QC_SETTLER_KEY)return;
   const job=await env.DB.prepare("SELECT * FROM jobs WHERE lease<=? AND state IN ('queued','reserving','calling_provider','consume_pending','release_pending') LIMIT 1").bind(now).first<Job>();
   if(!job)return;
   const claimed=await env.DB.prepare('UPDATE jobs SET lease=? WHERE id=? AND lease=? AND state=?').bind(now+leaseMs,job.id,job.lease,job.state).run();
   if(claimed.meta.changes!==1)return;
   if(job.state==='queued'&&job.prompt!==null){
+    if(!ready(env))return;
     await state(env,job.id,'reserving');
     await run(env,job.id,job.account,job.token,job.prompt);
     return;
@@ -152,19 +162,28 @@ async function handle(req:Request,env:Env){
     const job=await row(env,path.split('/').at(-1)!);
     return job?.account===session.account?respond(publicJob(job)):respond({error:'Job not found'},404);
   }
+  if(path==='/v1/claim'){
+    if(req.method==='GET')return respond(await claimStatus(env.DB,session.account,claimsEnabled(env)));
+    if(req.method==='POST'){
+      if(!claimsEnabled(env))return respond({error:'Trial claims are disabled'},503);
+      if(!await authorizedKey(session.account,session.public_key))return respond({error:'Wallet key revoked'},401);
+      await enqueueClaim(env.DB,session.account);
+      return respond(await claimStatus(env.DB,session.account,true),202);
+    }
+  }
   if(req.method!=='POST'||path!=='/v1/inference')return respond({error:'Route not found'},404);
   if(!ready(env))return respond({error:'Inference is not configured'},503);
   const {tokenId,prompt,idempotencyKey}=input;
-  if(typeof tokenId!=='string'||!/^\d{1,20}$/.test(tokenId)||typeof prompt!=='string'||!prompt.trim()||prompt.length>4000||typeof idempotencyKey!=='string'||!/^[-a-zA-Z0-9]{16,64}$/.test(idempotencyKey))return respond({error:'Invalid inference request'},400);
-  if(env.QC_POLICY_ID==='1'&&(session.account!=='bob.quotacarry-fund-7b29e1.testnet'||tokenId!=='1'))return respond({error:'Only the approved test NFT can run inference'},403);
+  if(typeof tokenId!=='string'||!/^\d{1,20}$/.test(tokenId)||typeof prompt!=='string'||!prompt.trim()||Buffer.byteLength(prompt)>768||typeof idempotencyKey!=='string'||!/^[-a-zA-Z0-9]{16,64}$/.test(idempotencyKey))return respond({error:'Invalid inference request'},400);
   const digest=hash(JSON.stringify([tokenId,prompt]));
   const existing=()=>env.DB.prepare('SELECT * FROM jobs WHERE account=? AND dedupe=?').bind(session.account,idempotencyKey).first<Job>();
   const prior=await existing();
   if(prior)return prior.digest===digest?respond(publicJob(prior)):respond({error:'Idempotency key already used'},409);
   if(!await authorizedKey(session.account,session.public_key))return respond({error:'Wallet key revoked'},401);
+  if(!await chain(env).eligible(session.account,tokenId))return respond({error:'NFT unavailable for this account'},403);
   const id=randomUUID();
-  const insert=await env.DB.prepare("INSERT OR IGNORE INTO jobs(id,account,dedupe,digest,token,prompt,state,created,lease) SELECT ?,?,?,?,?,?,'queued',?,? WHERE (SELECT COUNT(*) FROM jobs WHERE created>?) < 1")
-    .bind(id,session.account,idempotencyKey,digest,tokenId,prompt,now,0,env.QC_POLICY_ID=== '1' ? 0 : now-86400000).run();
+  const insert=await env.DB.prepare("INSERT OR IGNORE INTO jobs(id,account,dedupe,digest,token,prompt,state,created,lease) SELECT ?,?,?,?,?,?,'queued',?,? WHERE EXISTS (SELECT 1 FROM beta_claims WHERE token=? AND state='completed') AND (SELECT COUNT(*) FROM jobs WHERE created>?)*1536+1536 <= 6144 AND (SELECT COUNT(*) FROM jobs WHERE token=?) < 2 AND (SELECT COUNT(*) FROM jobs WHERE token IN (SELECT token FROM beta_claims WHERE token IS NOT NULL)) < 20 AND NOT EXISTS (SELECT 1 FROM jobs WHERE account=? AND created>?)")
+    .bind(id,session.account,idempotencyKey,digest,tokenId,prompt,now,0,tokenId,now-86400000,tokenId,session.account,now-60000).run();
   if(insert.meta.changes!==1){
     const concurrent=await existing();
     return concurrent?.digest===digest?respond(publicJob(concurrent)):respond({error:'Inference busy, daily limit reached, or reconciliation required'},409);
