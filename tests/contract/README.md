@@ -1,3 +1,3 @@
 # Contract tests
 
-Foundation unit coverage lives in the Rust crate. Phase 1 adds a NEAR Workspaces sandbox harness with real receiver WASM and the acceptance, rollback, receipt, and ownership cases in [ADR 0001](../../docs/ADR-0001-FOUNDATION.md). Testnet repetitions need deployment and signing approval.
+The contract crate contains the unit tests. This separate NEAR Workspaces crate isolates the sandbox dependency graph from the pinned contract SDK. Build the QuotaCarry contract and the receiver fixture using Cargo NEAR. Set `QUOTA_PASS_WASM` and `QUOTA_RECEIVER_WASM` to their absolute artifact paths and run `cargo test --locked --test sandbox -- --ignored --nocapture` from this directory on Linux. CI runs both suites. Testnet repetitions need deployment and signing approval.

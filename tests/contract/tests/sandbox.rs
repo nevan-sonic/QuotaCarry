@@ -263,6 +263,18 @@ async fn run() -> TestResult {
     );
     conservation(&contract).await?;
 
+    let storage_before = contract.view_account().await?.storage_usage;
+    assert!(
+        call(
+            &bob,
+            &contract,
+            "split",
+            json!({"token_id":token,"amount":"0","expected_epoch":"1","expected_mutation_seq":"0"}),
+            one
+        )
+        .await?
+        .is_failure()
+    );
     let child: String = call(
         &bob,
         &contract,
@@ -272,6 +284,20 @@ async fn run() -> TestResult {
     )
     .await?
     .json()?;
+    let split_growth = contract.view_account().await?.storage_usage - storage_before;
+    assert!((1..=4096).contains(&split_growth));
+    eprintln!("sandbox split storage growth: {split_growth} bytes");
+    assert!(
+        call(
+            &bob,
+            &contract,
+            "split",
+            json!({"token_id":token,"amount":"1","expected_epoch":"1","expected_mutation_seq":"0"}),
+            one
+        )
+        .await?
+        .is_failure()
+    );
     let merge = call(
         &bob,
         &contract,
@@ -283,9 +309,11 @@ async fn run() -> TestResult {
     .await?;
     verify_event(&merge, "nep171", "1.2.0", "nft_burn");
     merge.into_result()?;
+    assert_eq!(contract.view_account().await?.storage_usage, storage_before);
     conservation(&contract).await?;
 
     for (mode, recipient, restored) in [
+        ("split:2".to_owned(), receiver.id(), true),
         ("return".to_owned(), receiver.id(), true),
         ("panic".to_owned(), receiver.id(), true),
         ("malformed".to_owned(), receiver.id(), true),
@@ -303,6 +331,9 @@ async fn run() -> TestResult {
         .await?;
         verify_event(&outcome, "quotacarry", "1.0.0", "transfer_pending");
         verify_event(&outcome, "quotacarry", "1.0.0", "transfer_resolved");
+        if mode.starts_with("split:") {
+            assert!(format!("{:?}", outcome.receipt_failures()).contains("Transfer unresolved"));
+        }
         let gas = outcome.total_gas_burnt.as_gas();
         assert_eq!(outcome.json::<bool>()?, !restored);
         let pass = view(&contract, "get_allowance", json!({"token_id":token})).await?;
@@ -322,6 +353,20 @@ async fn run() -> TestResult {
 
     let pass = view(&contract, "get_allowance", json!({"token_id":token})).await?;
     assert!(decimal(&pass["epoch"]) > 1);
+    let height = worker.view_block().await?.height();
+    let stale = call(
+        &relayer,
+        &contract,
+        "reserve",
+        reserve_args(&token, &alice, 0, 4, height + 120),
+        zero,
+    )
+    .await?;
+    assert!(stale.is_failure());
+    assert_eq!(
+        view(&contract, "get_allowance", json!({"token_id":token})).await?,
+        pass
+    );
     let accepted = call(
         &alice,
         &contract,
@@ -354,6 +399,51 @@ async fn run() -> TestResult {
         )
         .await?
         .is_failure()
+    );
+    conservation(&contract).await?;
+
+    call(
+        &issuer,
+        &contract,
+        "create_policy",
+        json!({"issuer_id":"0","policy_hash":"b".repeat(64),"lifetime_cap":"1","max_open":1}),
+        zero,
+    )
+    .await?
+    .into_result()?;
+    let capped: String = call(
+        &issuer,
+        &contract,
+        "issue",
+        json!({"policy_id":"1","receiver_id":alice.id(),"amount":"1","expected_issue_seq":"1"}),
+        zero,
+    )
+    .await?
+    .json()?;
+    assert!(
+        call(
+            &issuer,
+            &contract,
+            "issue",
+            json!({"policy_id":"1","receiver_id":alice.id(),"amount":"1","expected_issue_seq":"2"}),
+            zero
+        )
+        .await?
+        .is_failure()
+    );
+    let other: String = call(
+        &issuer,
+        &contract,
+        "issue",
+        json!({"policy_id":"0","receiver_id":alice.id(),"amount":"1","expected_issue_seq":"2"}),
+        zero,
+    )
+    .await?
+    .json()?;
+    assert!(call(&alice,&contract,"merge",json!({"target_id":capped,"source_id":other,"target_epoch":"0","source_epoch":"0","target_mutation_seq":"0","source_mutation_seq":"0"}),one).await?.is_failure());
+    assert_eq!(
+        view(&contract, "get_allowance", json!({"token_id":capped})).await?["available"],
+        "1"
     );
     conservation(&contract).await
 }

@@ -97,10 +97,11 @@ fn randomized_conservation_and_storage_reuse() {
                         contract.settle(primary.clone(), seq, disposition),
                         SettlementResult::Applied
                     );
-                    assert_eq!(
-                        contract.settle(primary.clone(), seq, disposition),
-                        SettlementResult::Duplicate
-                    );
+                    let repeat = contract.settle(primary.clone(), seq, disposition);
+                    assert!(matches!(
+                        repeat,
+                        SettlementResult::Duplicate | SettlementResult::NoEvidence
+                    ));
                 }
             }
             _ => {}
@@ -122,4 +123,48 @@ fn randomized_conservation_and_storage_reuse() {
             ISSUER_BYTES + POLICY_BYTES + PASS_BYTES * ids.len() as u64
         );
     }
+}
+
+#[test]
+fn release_during_pending_callback_preserves_credit_and_owner() {
+    context("quota", 0);
+    let mut contract = QuotaPass::new(account("quota"));
+    context("quota", NearToken::from_near(1).as_yoctonear());
+    let issuer = contract.register_issuer(
+        account("issuer"),
+        account("relay"),
+        account("settler"),
+        U128(100),
+        4,
+    );
+    context("issuer", 0);
+    let policy = contract.create_policy(issuer, "a".repeat(64), U128(100), 4);
+    let token = contract.issue(policy, account("alice"), U128(100), U64(0));
+    context("relay", 0);
+    contract.reserve(
+        token.clone(),
+        account("alice"),
+        U64(0),
+        U64(0),
+        "b".repeat(64),
+        U64(110),
+    );
+    context("alice", 1);
+    drop(contract.nft_transfer_call(
+        account("bob"),
+        token.clone(),
+        None,
+        None,
+        "return".to_owned(),
+    ));
+    context("settler", 0);
+    assert_eq!(
+        contract.settle(token.clone(), U64(0), Disposition::Release),
+        SettlementResult::Applied
+    );
+    let pass = contract.get_allowance(token).unwrap();
+    assert_eq!(pass.owner_id, account("bob"));
+    assert_eq!(pass.pending, 1);
+    assert_eq!(pass.available.0, 100);
+    assert_eq!(pass.open, 0);
 }

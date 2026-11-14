@@ -1,10 +1,17 @@
-use near_sdk::{AccountId, Gas, NearToken, Promise, PromiseOrValue, env, ext_contract, near};
+use near_sdk::{AccountId, Gas, NearToken, PromiseOrValue, env, ext_contract, near};
 
 #[allow(dead_code)]
 #[ext_contract(ext_nft)]
 trait Nft {
     fn nft_transfer(&mut self, receiver_id: AccountId, token_id: String);
     fn nft_transfer_call(&mut self, receiver_id: AccountId, token_id: String, msg: String);
+    fn split(
+        &mut self,
+        token_id: String,
+        amount: String,
+        expected_epoch: String,
+        expected_mutation_seq: String,
+    );
 }
 
 #[allow(dead_code)]
@@ -34,15 +41,20 @@ impl Receiver {
             "malformed" => PromiseOrValue::Value("not a boolean".into()),
             _ => {
                 let (kind, account) = msg.split_once(':').expect("Fixture mode");
-                let recipient = account.parse().expect("Recipient");
                 let nft = ext_nft::ext(env::predecessor_account_id())
                     .with_attached_deposit(NearToken::from_yoctonear(1));
                 let promise = match kind {
+                    "split" => nft.with_static_gas(Gas::from_tgas(18)).split(
+                        token_id,
+                        "1".to_owned(),
+                        account.to_owned(),
+                        "2".to_owned(),
+                    ),
                     "forward" => nft
                         .with_static_gas(Gas::from_tgas(18))
-                        .nft_transfer(recipient, token_id),
+                        .nft_transfer(account.parse().expect("Recipient"), token_id),
                     "nested" => nft.with_static_gas(Gas::from_tgas(100)).nft_transfer_call(
-                        recipient,
+                        account.parse().expect("Recipient"),
                         token_id,
                         "return".to_owned(),
                     ),

@@ -18,6 +18,8 @@ Run real receiver contracts through NEAR Workspaces in Phase 1, and repeat repre
 
 ## Storage, dispatch and spend
 
+The Phase 1 interfaces and fixed storage budgets are recorded in [Contract API](CONTRACT_SPEC.md) and [Accounting invariants](ACCOUNTING_INVARIANTS.md).
+
 Prepay issuer storage for bounded live passes, reservation slots and temporary pending transfer entries. Measure actual storage and callback gas using maximum supported IDs, and reject writes lacking prepaid capacity. Delete terminal liability rows while keeping a monotone replay counter. Preserve immutable issuer/policy boundaries and the conservation equation from the plan.
 
 Use transactional idempotency and outbox, a durable dispatch fence before upstream I/O, no generation retries, and conservative settlement after ambiguous outcomes. PostgreSQL, NEAR and the provider have independent failure boundaries. A trusted gateway can enforce one application send attempt. Provider processing and billing remain independently observed. Public sponsored inference requires provider permission, an isolated project, bounded request caps, funded issuance, provider-side spend controls where available, and issuer/day/global admission limits.
