@@ -4,6 +4,8 @@ QuotaCarry is a NEAR-based project for issuing and transferring bounded AI infer
 
 ## Try the foundation
 
+The [testnet deployment manifest](docs/TESTNET_DEPLOYMENT.md) records the reviewed artifact, approval gate, and read-only verification commands. The [Phase 2 evidence log](docs/PHASE_2_VERIFICATION.md) tracks deployment status.
+
 1. Install Node from `.node-version` (bundled npm 11.19.1). Run `npm ci` from the repository root. Use `npm.cmd` in PowerShell if the npm PowerShell shim is unavailable.
 2. Run `npm run dev -w @quotacarry/web` and open http://localhost:3000. The landing page describes the intended product.
 3. Run `npm run build -w @quotacarry/gateway`, then `npm start -w @quotacarry/gateway`. Open http://127.0.0.1:3001/health. The gateway reports local process readiness and sends an X-Request-ID header.

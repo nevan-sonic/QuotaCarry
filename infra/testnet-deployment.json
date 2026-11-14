@@ -1,0 +1,34 @@
+{
+  "network": "testnet",
+  "funding": "quotacarry-fund-7b29e1.testnet",
+  "governance": "quotacarry-fund-7b29e1.testnet",
+  "contract": "quotacarry-fund-7b29e1.testnet",
+  "issuer": "issuer.quotacarry-fund-7b29e1.testnet",
+  "relayer": "relayer.quotacarry-fund-7b29e1.testnet",
+  "settler": "settler.quotacarry-fund-7b29e1.testnet",
+  "alice": "alice.quotacarry-fund-7b29e1.testnet",
+  "bob": "bob.quotacarry-fund-7b29e1.testnet",
+  "sourceCommit": "c62abe6d04205a992120bcc7eff4d8c3af099bf4",
+  "wasmSha256": "1bae619e7c7dbfc12d710468a4a9cfed78c55eed3854e79802b5a1a648956e5c",
+  "wasmBytes": 227993,
+  "initialize": {
+    "method": "new",
+    "args": {
+      "governance": "quotacarry-fund-7b29e1.testnet"
+    },
+    "gasTgas": 30,
+    "depositYocto": "0"
+  },
+  "contractFundingYocto": "2500000000000000000000000",
+  "roleFundingYocto": "50000000000000000000000",
+  "issuerDepositYocto": "150000000000000000000000",
+  "feeReserveYocto": "100000000000000000000000",
+  "fundingFloorYocto": "3100000000000000000000000",
+  "childPublicKeys": {
+    "issuer.quotacarry-fund-7b29e1.testnet": "ed25519:2qHdcsoYzazSXvffQF2ZHTWrtvaomYX6DbF8RhcbhoXU",
+    "relayer.quotacarry-fund-7b29e1.testnet": "ed25519:C37sBZMVM6X3QBUSDR24xJtvmB9mVJkc8PErQ9w397xK",
+    "settler.quotacarry-fund-7b29e1.testnet": "ed25519:8W16WoxP7a7dCZ6HDXVPktHQw3gihqmke7qy7ar4oSKs",
+    "alice.quotacarry-fund-7b29e1.testnet": "ed25519:DyKeot7zgcDY3LDvHBWfHuYXGPG9LaDAWoHnT8drkftr",
+    "bob.quotacarry-fund-7b29e1.testnet": "ed25519:tGqwyuaDcU1fHuQdKVgtKxrcn72kcyWmXMNShnVQeGw"
+  }
+}

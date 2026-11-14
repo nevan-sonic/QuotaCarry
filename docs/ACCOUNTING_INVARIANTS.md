@@ -1,5 +1,7 @@
 # Accounting invariants
 
+The Phase 2 read-only verifier recomputes these totals at one finalized testnet block. See the [deployment and verification instructions](TESTNET_DEPLOYMENT.md).
+
 Per policy, lifetime issued equals live available plus open reservations plus cumulative consumed. A reservation moves one credit from available to open. Consumption moves it from open to consumed. Release restores available on the original token. A split only redistributes the parent available amount. Merge checks both epochs and mutation sequences and permits source burn only when it has no unresolved callback or open liability. Aggregate policy totals do not change during split, merge or ownership transfer.
 
 Owner and epoch checks are in the reserve receipt. Every ownership change increments the epoch, including rollback. The permanent reserve sequence prevents replay after settlement. Settlement stores up to eight sequence-indexed outcomes per live pass. An older outcome can be replaced by a newer sequence in the same slot. An out-of-order older settlement cannot overwrite a newer one. After eviction or burn the API returns no evidence, and the reconciler must consult successful finalized events to decide whether an earlier call applied the intended disposition. This path has no credit effect.
