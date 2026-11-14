@@ -35,6 +35,8 @@ jobs:
           export PATH="$(dirname "$(find /tmp/quotacarry-cargo-near -type f -name cargo-near -print -quit)"):$PATH"
           cargo near --version
           cargo near build non-reproducible-wasm --locked --no-abi --out-dir "$RUNNER_TEMP/quotacarry-wasm"
+          cd fixtures/receiver
+          cargo near build non-reproducible-wasm --locked --no-abi --out-dir "$RUNNER_TEMP/quotacarry-fixtures"
           cd "$RUNNER_TEMP/quotacarry-wasm"
           test -s quota_pass.wasm
           test "$(od -An -tx1 -N8 quota_pass.wasm | tr -d ' \n')" = 0061736d01000000
@@ -45,6 +47,14 @@ jobs:
             printf 'Artifact: `quota-pass-wasm-%s`\n\n' "$GITHUB_SHA"
             printf '    %s\n' "$(cat SHA256SUMS)"
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Test sandbox receipt chains
+        timeout-minutes: 9
+        working-directory: tests/contract
+        run: |
+          cargo fmt --all -- --check
+          export QUOTA_PASS_WASM="$RUNNER_TEMP/quotacarry-wasm/quota_pass.wasm"
+          export QUOTA_RECEIVER_WASM="$RUNNER_TEMP/quotacarry-fixtures/quota_receiver_fixture.wasm"
+          cargo test --locked --test sandbox -- --ignored --nocapture
       - name: Scan files and history
         run: |
           asset=gitleaks_8.30.0_linux_x64.tar.gz
