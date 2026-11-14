@@ -312,8 +312,10 @@ async fn run() -> TestResult {
     assert_eq!(contract.view_account().await?.storage_usage, storage_before);
     conservation(&contract).await?;
 
+    call(&issuer,&contract,"rotate_roles",json!({"issuer_id":"0","controller":issuer.id(),"authorizer":receiver.id(),"settler":settler.id()}),zero).await?.into_result()?;
     for (mode, recipient, restored) in [
         ("split:2".to_owned(), receiver.id(), true),
+        ("reserve".to_owned(), receiver.id(), true),
         ("return".to_owned(), receiver.id(), true),
         ("panic".to_owned(), receiver.id(), true),
         ("malformed".to_owned(), receiver.id(), true),
@@ -331,7 +333,7 @@ async fn run() -> TestResult {
         .await?;
         verify_event(&outcome, "quotacarry", "1.0.0", "transfer_pending");
         verify_event(&outcome, "quotacarry", "1.0.0", "transfer_resolved");
-        if mode.starts_with("split:") {
+        if mode.starts_with("split:") || mode == "reserve" {
             assert!(format!("{:?}", outcome.receipt_failures()).contains("Transfer unresolved"));
         }
         let gas = outcome.total_gas_burnt.as_gas();
@@ -351,6 +353,7 @@ async fn run() -> TestResult {
         conservation(&contract).await?;
     }
 
+    call(&issuer,&contract,"rotate_roles",json!({"issuer_id":"0","controller":issuer.id(),"authorizer":relayer.id(),"settler":settler.id()}),zero).await?.into_result()?;
     let pass = view(&contract, "get_allowance", json!({"token_id":token})).await?;
     assert!(decimal(&pass["epoch"]) > 1);
     let height = worker.view_block().await?.height();

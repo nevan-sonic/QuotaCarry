@@ -168,3 +168,41 @@ fn release_during_pending_callback_preserves_credit_and_owner() {
     assert_eq!(pass.available.0, 100);
     assert_eq!(pass.open, 0);
 }
+
+#[test]
+fn maximum_credit_balance_round_trips_through_reservation() {
+    context("quota", 0);
+    let mut contract = QuotaPass::new(account("quota"));
+    context("quota", NearToken::from_near(1).as_yoctonear());
+    let issuer = contract.register_issuer(
+        account("issuer"),
+        account("relay"),
+        account("settler"),
+        U128(u128::MAX),
+        4,
+    );
+    context("issuer", 0);
+    let policy = contract.create_policy(issuer, "a".repeat(64), U128(u128::MAX), 4);
+    let token = contract.issue(policy, account("alice"), U128(u128::MAX), U64(0));
+    context("relay", 0);
+    contract.reserve(
+        token.clone(),
+        account("alice"),
+        U64(0),
+        U64(0),
+        "b".repeat(64),
+        U64(100),
+    );
+    context("settler", 0);
+    assert_eq!(
+        contract.settle(token.clone(), U64(0), Disposition::Release),
+        SettlementResult::Applied
+    );
+    assert_eq!(
+        contract.get_allowance(token).unwrap().available.0,
+        u128::MAX
+    );
+    let policy = contract.get_policy(policy).unwrap();
+    assert_eq!(policy.issued.0, u128::MAX);
+    assert_eq!(policy.open, 0);
+}

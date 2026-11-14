@@ -12,6 +12,15 @@ trait Nft {
         expected_epoch: String,
         expected_mutation_seq: String,
     );
+    fn reserve(
+        &mut self,
+        token_id: String,
+        holder_id: AccountId,
+        expected_epoch: String,
+        seq: String,
+        request_commitment: String,
+        valid_through_height: String,
+    );
 }
 
 #[allow(dead_code)]
@@ -39,6 +48,23 @@ impl Receiver {
             "return" => PromiseOrValue::Value(true.into()),
             "panic" => env::panic_str("Fixture receiver failure"),
             "malformed" => PromiseOrValue::Value("not a boolean".into()),
+            "reserve" => PromiseOrValue::Promise(
+                ext_nft::ext(env::predecessor_account_id())
+                    .with_static_gas(Gas::from_tgas(18))
+                    .reserve(
+                        token_id,
+                        env::current_account_id(),
+                        "4".to_owned(),
+                        "4".to_owned(),
+                        "a".repeat(64),
+                        env::block_height().saturating_add(100).to_string(),
+                    )
+                    .then(
+                        ext_self::ext(env::current_account_id())
+                            .with_static_gas(Gas::from_tgas(5))
+                            .request_return(),
+                    ),
+            ),
             _ => {
                 let (kind, account) = msg.split_once(':').expect("Fixture mode");
                 let nft = ext_nft::ext(env::predecessor_account_id())
