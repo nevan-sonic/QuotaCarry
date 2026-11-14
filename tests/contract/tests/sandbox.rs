@@ -82,6 +82,133 @@ fn reserve_args(token: &str, holder: &Account, epoch: u64, seq: u64, deadline: u
 }
 
 #[tokio::test]
+#[ignore = "requires v1 and v2 WASM artifacts"]
+async fn upgrade_preserves_open_request_reservations() -> TestResult {
+    let worker = near_workspaces::sandbox().await?;
+    let contract = worker
+        .dev_deploy(&std::fs::read(std::env::var("QUOTA_PASS_V1_WASM")?)?)
+        .await?;
+    let issuer = worker.dev_create_account().await?;
+    let relay = worker.dev_create_account().await?;
+    let settler = worker.dev_create_account().await?;
+    let holder = worker.dev_create_account().await?;
+    let zero = NearToken::from_yoctonear(0);
+    call(
+        contract.as_account(),
+        &contract,
+        "new",
+        json!({"governance":contract.id()}),
+        zero,
+    )
+    .await?
+    .into_result()?;
+    let roles = json!({"controller":issuer.id(),"authorizer":relay.id(),"settler":settler.id(),"lifetime_cap":"500","max_open":4});
+    call(
+        contract.as_account(),
+        &contract,
+        "register_issuer",
+        roles.clone(),
+        NearToken::from_near(1),
+    )
+    .await?
+    .into_result()?;
+    call(
+        &issuer,
+        &contract,
+        "create_policy",
+        json!({"issuer_id":"0","policy_hash":DIGEST,"lifetime_cap":"500","max_open":4}),
+        zero,
+    )
+    .await?
+    .into_result()?;
+    call(
+        &issuer,
+        &contract,
+        "issue",
+        json!({"policy_id":"0","receiver_id":holder.id(),"amount":"10","expected_issue_seq":"0"}),
+        zero,
+    )
+    .await?
+    .into_result()?;
+    let height = worker.view_block().await?.height();
+    call(
+        &relay,
+        &contract,
+        "reserve",
+        reserve_args("0", &holder, 0, 0, height + 100),
+        zero,
+    )
+    .await?
+    .into_result()?;
+    let pass = view(&contract, "get_allowance", json!({"token_id":"0"})).await?;
+    let policy = view(&contract, "get_policy", json!({"policy_id":"0"})).await?;
+    let reservation = view(
+        &contract,
+        "get_reservation",
+        json!({"token_id":"0","seq":"0"}),
+    )
+    .await?;
+    contract
+        .as_account()
+        .deploy(&std::fs::read(std::env::var("QUOTA_PASS_WASM")?)?)
+        .await?
+        .into_result()?;
+    assert_eq!(
+        view(&contract, "get_allowance", json!({"token_id":"0"})).await?,
+        pass
+    );
+    assert_eq!(
+        view(&contract, "get_policy", json!({"policy_id":"0"})).await?,
+        policy
+    );
+    assert_eq!(
+        view(
+            &contract,
+            "get_reservation",
+            json!({"token_id":"0","seq":"0"})
+        )
+        .await?,
+        reservation
+    );
+    call(
+        &settler,
+        &contract,
+        "settle",
+        json!({"token_id":"0","seq":"0","disposition":"consume"}),
+        zero,
+    )
+    .await?
+    .into_result()?;
+    assert_eq!(
+        view(&contract, "get_policy", json!({"policy_id":"0"})).await?["consumed"],
+        "1"
+    );
+    call(
+        contract.as_account(),
+        &contract,
+        "register_metered_issuer",
+        roles,
+        NearToken::from_near(1),
+    )
+    .await?
+    .into_result()?;
+    call(
+        &issuer,
+        &contract,
+        "create_policy",
+        json!({"issuer_id":"1","policy_hash":DIGEST,"lifetime_cap":"500","max_open":4}),
+        zero,
+    )
+    .await?
+    .into_result()?;
+    assert_eq!(
+        view(&contract, "get_policy", json!({"policy_id":"1"})).await?["denomination_version"],
+        2
+    );
+    conservation(&contract).await
+}
+
+#[tokio::test]
 #[ignore = "requires compiled QuotaCarry and receiver WASM paths"]
 async fn sandbox_contract() -> TestResult {
     tokio::time::timeout(Duration::from_secs(420), run()).await??;

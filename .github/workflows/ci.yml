@@ -35,6 +35,11 @@ jobs:
           export PATH="$(dirname "$(find /tmp/quotacarry-cargo-near -type f -name cargo-near -print -quit)"):$PATH"
           cargo near --version
           cargo near build non-reproducible-wasm --locked --no-abi --out-dir "$RUNNER_TEMP/quotacarry-wasm"
+          git worktree add --detach "$RUNNER_TEMP/quotacarry-v1" 90545fc
+          (
+            cd "$RUNNER_TEMP/quotacarry-v1/contracts/quota-pass"
+            cargo near build non-reproducible-wasm --locked --no-abi --out-dir "$RUNNER_TEMP/quotacarry-v1-wasm"
+          )
           cd fixtures/receiver
           cargo near build non-reproducible-wasm --locked --no-abi --out-dir "$RUNNER_TEMP/quotacarry-fixtures"
           cd "$RUNNER_TEMP/quotacarry-wasm"
@@ -53,6 +58,7 @@ jobs:
         run: |
           cargo fmt --all -- --check
           export QUOTA_PASS_WASM="$RUNNER_TEMP/quotacarry-wasm/quota_pass.wasm"
+          export QUOTA_PASS_V1_WASM="$RUNNER_TEMP/quotacarry-v1-wasm/quota_pass.wasm"
           export QUOTA_RECEIVER_WASM="$RUNNER_TEMP/quotacarry-fixtures/quota_receiver_fixture.wasm"
           cargo test --locked --test sandbox -- --ignored --nocapture
       - name: Scan files and history
