@@ -5,13 +5,13 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 QC_INFERENCE_ENABLED = "0"
-QC_ORIGIN = "http://127.0.0.1:3010"
-GROQ_MODEL = "llama-3.1-8b-instant"
+QC_ORIGIN = "https://quotacarry-web.quotacarry.workers.dev"
+GROQ_MODEL = "openai/gpt-oss-20b"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "quotacarry"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "d4f2630f-02b3-485a-b717-51433a2d0468"
 migrations_dir = "migrations"
 
 [triggers]

@@ -107,7 +107,7 @@ async function handle(req:Request,env:Env){
   if(req.method==='GET'&&path==='/health')return respond({ready:true});
   if(req.method==='GET'&&path==='/ready'){
     await env.DB.prepare('SELECT nonce FROM challenges LIMIT 1').first();
-    return respond({database:'available',inference:ready(env)?'configured':'not_configured'},ready(env)?200:503);
+    return respond({database:'available',model:env.GROQ_MODEL??null,inference:ready(env)?'configured':'not_configured'},ready(env)?200:503);
   }
   if(!env.QC_ORIGIN||req.headers.get('Origin')!==env.QC_ORIGIN)return respond({error:'Origin rejected'},403);
   headers.set('Access-Control-Allow-Origin',env.QC_ORIGIN);

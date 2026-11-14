@@ -8,7 +8,7 @@ API keys are difficult to transfer safely and do not carry a portable, auditable
 - Contract: [quotacarry-fund-7b29e1.testnet](https://explorer.testnet.near.org/accounts/quotacarry-fund-7b29e1.testnet)
 - Demo token and policy: both 0
 - Evidence: [transfer](https://explorer.testnet.near.org/transactions/davp7Z7GTM4FBzRxKLyAFRhJSf6moJg49K5dN3PZxiQ), [stale owner rejected](https://explorer.testnet.near.org/transactions/2cUdDxFQT3cbAjexjxE6MgYNgkFPVFe3wy2MtnrADb8t), [Bob reserved](https://explorer.testnet.near.org/transactions/8nT3aUGXtz57Zw8Bs4JefpaFAHcdLuxNtczndRvvZgEF), [final settlement](https://explorer.testnet.near.org/transactions/J7TceTF9PqfMM1MREFnnVs59FLF6zNnjddJoBHwXgNRK)
-- Public application, gateway and recorded demo URLs: pending
+- Public application: [QuotaCarry](https://quotacarry-web.quotacarry.workers.dev/). Gateway: [health endpoint](https://quotacarry-gateway.quotacarry.workers.dev/health). Recorded demo: pending.
 
 NEAR supplies standard NFT ownership and transfer, explicit role accounts, finalized receipts, and an independently readable ledger. The relayer is issuer-operated and trusted to authenticate users. See [threat model](THREAT_MODEL.md).
 
@@ -32,7 +32,7 @@ Install workspace packages with `npm ci`. Run `npm run lint`, `npm run typecheck
 
 The frontend reads snapshots from finalized testnet RPC with read-only failover, refreshes every 20 seconds, and checks the final receipt after a wallet transfer. The local production API returned the expected token state and independently resolved the historical transfer. An app-initiated wallet transfer still needs a live browser test with a separately approved transaction.
 
-The authenticated gateway and playground are implemented. Public deployment and live inference verification are pending.
+The authenticated gateway and playground are implemented. The frontend and gateway are deployed on Cloudflare Workers. Live inference verification is pending.
 
 ## Gateway deployment and recovery
 

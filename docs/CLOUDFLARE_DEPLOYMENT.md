@@ -27,4 +27,4 @@ Keep historical token 0 unchanged. Use a fresh issuer and policy capped at one c
 
 Each call uses 30 Tgas, for 180 Tgas prepaid. Budget 32 Tgas per call including overhead at up to 400 million yoctoNEAR/gas. Fee budget 0.0768 NEAR, aggregate projection 0.136800000000000000000001 NEAR. Proposed ceiling 0.14 testnet NEAR. Recheck the fee estimate and signer balances before execution. Wallet authentication and finalized ownership reads do not sign transactions. Alice and Bob need real wallets for the fresh transfer and authentication.
 
-One Groq chat completion using llama-3.1-8b-instant, one short test prompt and a 512-completion-token cap. No automatic provider retries. Use a Groq account with no billable usage enabled. If the model is unavailable under that account or could incur charges, stop for separate pricing approval.
+One Groq chat completion using openai/gpt-oss-20b, one short test prompt and a 512-completion-token cap. No automatic provider retries. Use a Groq account with no billable usage enabled. If the model is unavailable under that account or could incur charges, stop for separate pricing approval.
