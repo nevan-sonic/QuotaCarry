@@ -12,6 +12,14 @@ QC_POLICY_ID = "2"
 QC_ORIGIN = "https://quotacarry-web.quotacarry.workers.dev"
 GROQ_MODEL = "openai/gpt-oss-20b"
 
+[[services]]
+binding = "QC_ADAPTER_A"
+service = "quotacarry-issuer-adapter-a"
+
+[[services]]
+binding = "QC_ADAPTER_B"
+service = "quotacarry-issuer-adapter-b"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "quotacarry"

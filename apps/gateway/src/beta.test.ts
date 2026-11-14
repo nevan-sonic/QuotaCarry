@@ -3,6 +3,41 @@ import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+test('team roles do not grant owner or administrator escalation', async () => {
+  const {canManageTeam,canManageAdapter}=await import('./teams.js');
+  for(const role of [null,'viewer','developer'] as const){
+    assert(!canManageAdapter(role));
+    assert(!canManageTeam(role,'viewer'));
+  }
+  assert(canManageTeam('administrator','developer'));
+  assert(!canManageTeam('administrator','administrator'));
+  assert(!canManageTeam('owner','owner'));
+  assert(canManageTeam('owner','administrator'));
+});
+
+test('credential rotation is atomic, tenant scoped, and preserves model and epoch', async () => {
+  const {rotateDeveloperToken,readDeveloperToken}=await import('./developer-tokens.js');
+  const db=new DatabaseSync(':memory:');
+  try {
+    for(const name of ['0001_inference.sql','0002_beta.sql','0003_developer_tokens.sql','0004_issuer_adapters.sql','0005_credential_rotation.sql']){
+      db.exec(readFileSync(new URL('../migrations/'+name,import.meta.url),'utf8'));
+    }
+    const binding={prepare:(sql:string)=>({bind:(...params:string[])=>({first:async()=>db.prepare(sql).get(...params)??null})})} as unknown as import('@cloudflare/workers-types').D1Database;
+    db.prepare('INSERT INTO qc_developer_tokens(digest,id,account,nft,issuer,policy,epoch,name,model,expires) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run('old-digest','old','alice.testnet','5','3','4','1','integration','demo',Date.now()+60000);
+    const pass={owner_id:'alice.testnet',issuer_id:'3',policy_id:'4',epoch:'1',available:'1'};
+    assert.equal(await rotateDeveloperToken(binding,'bob.testnet','old',pass),null);
+    assert.equal(await rotateDeveloperToken(binding,'alice.testnet','old',{...pass,epoch:'3'}),null);
+    const results=await Promise.all([rotateDeveloperToken(binding,'alice.testnet','old',pass),rotateDeveloperToken(binding,'alice.testnet','old',pass)]);
+    assert.equal(results.filter(Boolean).length,1);
+    const replacement=results.find(Boolean)!;
+    assert.equal((await readDeveloperToken(binding,'Bearer '+replacement.token))?.epoch,'1');
+    assert.equal(replacement.model,'demo');
+    assert(db.prepare("SELECT revoked FROM qc_developer_tokens WHERE id='old'").get()?.revoked);
+    assert.equal(db.prepare("SELECT count(*) AS count FROM qc_credential_audit WHERE action='rotated'").get()?.count,1);
+  } finally {db.close();}
+});
+
 test('beta allocations enforce account uniqueness, bounded supply and one active mint', () => {
   const db=new DatabaseSync(':memory:');
   try {

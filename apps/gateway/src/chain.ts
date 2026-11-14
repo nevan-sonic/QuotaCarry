@@ -48,6 +48,11 @@ export async function readEntitlement(token_id:string) {
 export async function readIssuer(issuer_id:string){
   return view('get_issuer',{issuer_id},await block());
 }
+export async function listEntitlements(account_id:string,from_index:string){
+  const b=await block();
+  const tokens=await view('nft_tokens_for_owner',{account_id,from_index,limit:10},b) as {token_id:string}[];
+  return Promise.all(tokens.map(async ({token_id})=>({token_id,...await view('get_allowance',{token_id},b)})));
+}
 async function access(account_id:string,public_key:string,b:Block){
   return rpc('query',{request_type:'view_access_key',account_id,public_key,block_id:b.hash});
 }

@@ -1,11 +1,12 @@
 import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import type {D1Database,ExecutionContext} from '@cloudflare/workers-types';
-import {authorizedKey,createChain,finalized,readEntitlement,readIssuer,type Intent} from './chain.js';
+import {authorizedKey,createChain,finalized,listEntitlements,readEntitlement,readIssuer,type Intent} from './chain.js';
 import {createChallenge,verifyNearMessage} from './near-message.js';
 import {createGroqProvider,ProviderError} from './groq.js';
-import {mintDeveloperToken,revokeDeveloperToken,readDeveloperToken,matchesEntitlement} from './developer-tokens.js';
+import {mintDeveloperToken,revokeDeveloperToken,readDeveloperToken,matchesEntitlement,rotateDeveloperToken} from './developer-tokens.js';
 import {adapterRoute,configuredAdapter,dispatchAdapter,verifyAdapter,type AdapterRegistryEnv} from './issuer-routing.js';
 import {claimStatus,enqueueClaim,recoverClaim} from './claims.js';
+import {canManageAdapter,canManageTeam,type TeamRole} from './teams.js';
 
 interface Env extends AdapterRegistryEnv {
   DB:D1Database;
@@ -150,7 +151,7 @@ async function handle(req:Request,env:Env){
   headers.set('Access-Control-Allow-Methods','GET, POST, OPTIONS');
   headers.set('Access-Control-Allow-Headers','Content-Type, Authorization, Idempotency-Key');
   if(req.method==='OPTIONS')return new Response(null,{status:204,headers});
-  if(!path.startsWith('/v1/')&&!['/v2/tokens','/v2/issuer-adapter'].includes(path))return respond({error:'Route not found'},404);
+  if(!path.startsWith('/v1/')&&!['/v2/tokens','/v2/issuer-adapter','/v2/nfts','/v2/team'].includes(path))return respond({error:'Route not found'},404);
   const now=Date.now(), minute=Math.floor(now/60000);
   const bucket=hash((req.headers.get('CF-Connecting-IP')??'local')+':'+minute);
   const limit=await env.DB.prepare('INSERT INTO limits VALUES (?,1,?) ON CONFLICT(bucket) DO UPDATE SET count=count+1 RETURNING count')
@@ -201,37 +202,90 @@ async function handle(req:Request,env:Env){
   const walletSession=bearer&&await env.DB.prepare('SELECT account,public_key FROM sessions WHERE token=? AND expires>?').bind(hash(bearer),now).first<{account:string;public_key:string}>();
   const session=credential?{account:credential.account,public_key:''}:walletSession;
   if(!session)return respond({error:'Authenticate your wallet'},401);
-  if(path==='/v2/issuer-adapter'){
+  if(path==='/v2/nfts'&&req.method==='GET'){
+    const from=new URL(req.url).searchParams.get('from')??'0';
+    if(!/^\d{1,20}$/.test(from))return respond({error:'Invalid cursor'},400);
+    const nfts=await listEntitlements(session.account,from);
+    return respond({nfts,next:nfts.length===10?String(BigInt(from)+10n):null,routing:routingEnabled(env)});
+  }
+  if(path==='/v2/issuer-adapter'||path==='/v2/team'){
     if(!routingEnabled(env))return respond({error:'Issuer routing is disabled'},503);
     const issuerId=req.method==='GET'?new URL(req.url).searchParams.get('issuer'):input.issuer;
     if(typeof issuerId!=='string'||!/^(0|[1-9][0-9]{0,19})$/.test(issuerId)||['0','1','2'].includes(issuerId))return respond({error:'Invalid issuer'},400);
     if(!await authorizedKey(session.account,session.public_key))return respond({error:'Wallet key revoked'},401);
     const issuer=await readIssuer(issuerId);
-    if(issuer?.controller!==session.account)return respond({error:'Issuer controller required'},403);
+    if(!issuer)return respond({error:'Issuer unavailable'},404);
+    const actor=session.account, owner=issuer.controller===actor;
+    const team=await env.DB.prepare('SELECT name FROM qc_issuer_teams WHERE issuer=? AND controller=?').bind(issuerId,issuer.controller).first<{name:string}>();
+    const member=team?await env.DB.prepare('SELECT role,accepted FROM qc_team_members WHERE issuer=? AND account=?').bind(issuerId,actor)
+      .first<{role:TeamRole;accepted:number}>():null;
+    const role=owner?'owner':member?.accepted?member.role:null;
+    if(path==='/v2/team'){
+      const now=Date.now();
+      if(req.method==='GET'){
+        if(!role)return respond({error:'Team membership required'},403);
+        const members=team?await env.DB.prepare('SELECT account,role,accepted FROM qc_team_members WHERE issuer=? ORDER BY account LIMIT 100').bind(issuerId).all():null;
+        const audit=team?await env.DB.prepare('SELECT actor,target,action,created FROM qc_team_audit WHERE issuer=? ORDER BY id DESC LIMIT 50').bind(issuerId).all():null;
+        return respond({team,role,controller:issuer.controller,members:members?.results??[],audit:audit?.results??[]});
+      }
+      if(req.method!=='POST')return respond({error:'Method rejected'},405);
+      if(input.action==='create'&&owner&&typeof input.name==='string'&&input.name.trim()&&input.name.length<=64){
+        await env.DB.prepare('INSERT OR IGNORE INTO qc_issuer_teams VALUES (?,?,?)').bind(issuerId,actor,input.name.trim()).run();
+        return respond({created:true});
+      }
+      if(input.action==='accept'&&member&&!member.accepted){
+        const result=await env.DB.batch([
+          env.DB.prepare("INSERT INTO qc_team_audit(issuer,actor,target,action,created) SELECT issuer,account,account,'accepted',? FROM qc_team_members WHERE issuer=? AND account=? AND accepted=0").bind(now,issuerId,actor),
+          env.DB.prepare('UPDATE qc_team_members SET accepted=1 WHERE issuer=? AND account=? AND accepted=0').bind(issuerId,actor),
+        ]);
+        return result[1].meta.changes===1?respond({accepted:true}):respond({error:'Invitation changed'},409);
+      }
+      const target=input.account;
+      if(!team||!role||typeof target!=='string'||target.length>64||!account.test(target)||target===issuer.controller)return respond({error:'Team action rejected'},403);
+      const existing=await env.DB.prepare('SELECT role FROM qc_team_members WHERE issuer=? AND account=?').bind(issuerId,target).first<{role:TeamRole}>();
+      const targetRole=input.role as TeamRole;
+      if(existing&&!canManageTeam(role,existing.role))return respond({error:'Target role protected'},403);
+      const action=input.action;
+      if(action!=='remove'&&action!=='invite'&&action!=='role')return respond({error:'Unknown team action'},400);
+      if(action==='remove'&&(!existing||!canManageTeam(role,existing.role)))return respond({error:'Removal rejected'},403);
+      if(action!=='remove'&&(!['administrator','developer','viewer'].includes(targetRole)||!canManageTeam(role,targetRole)))return respond({error:'Role assignment rejected'},403);
+      const actorGuard="EXISTS (SELECT 1 FROM qc_issuer_teams WHERE issuer=? AND controller=?) AND (?='owner' OR EXISTS (SELECT 1 FROM qc_team_members WHERE issuer=? AND account=? AND role=? AND accepted=1))";
+      const guard=[issuerId,issuer.controller,role,issuerId,actor,role];
+      const statement=action==='invite'
+        ?env.DB.prepare("INSERT OR IGNORE INTO qc_team_members SELECT ?,?,?,0 WHERE "+actorGuard+" AND (SELECT count(*) FROM qc_team_members WHERE issuer=?)<50").bind(issuerId,target,targetRole,...guard,issuerId)
+        :action==='role'
+          ?env.DB.prepare('UPDATE qc_team_members SET role=? WHERE issuer=? AND account=? AND role=? AND '+actorGuard).bind(targetRole,issuerId,target,existing?.role??'',...guard)
+          :env.DB.prepare('DELETE FROM qc_team_members WHERE issuer=? AND account=? AND role=? AND '+actorGuard).bind(issuerId,target,existing?.role??'',...guard);
+      const changes=await env.DB.batch([statement,env.DB.prepare('INSERT INTO qc_team_audit(issuer,actor,target,action,created) SELECT ?,?,?,?,? WHERE changes()=1').bind(issuerId,actor,target,action,now)]);
+      return changes[0].meta.changes===1?respond({updated:true}):respond({error:'Membership changed or team limit reached'},409);
+    }
+    if(!role||(req.method!=='GET'&&!canManageAdapter(role)))return respond({error:'Issuer permission required'},403);
     if(req.method==='GET'){
-      const config=await env.DB.prepare('SELECT issuer,model,daily_limit,updated FROM qc_issuer_adapters WHERE issuer=? AND controller=?').bind(issuerId,session.account).first();
+      const config=await env.DB.prepare('SELECT issuer,model,daily_limit,updated FROM qc_issuer_adapters WHERE issuer=? AND controller=?').bind(issuerId,issuer.controller).first();
       const audit=await env.DB.prepare('SELECT action,actor,created FROM qc_issuer_adapter_audit WHERE issuer=? ORDER BY id DESC LIMIT 50').bind(issuerId).all();
       return respond({config,audit:audit.results});
     }
     if(req.method!=='POST')return respond({error:'Method rejected'},405);
     const now=Date.now();
+    const writeGuard="(?=1 OR EXISTS (SELECT 1 FROM qc_team_members m JOIN qc_issuer_teams t ON m.issuer=t.issuer WHERE m.issuer=? AND t.controller=? AND m.account=? AND m.accepted=1 AND m.role='administrator'))";
+    const guardArgs=[Number(owner),issuerId,issuer.controller,actor];
     if(input.action==='revoke'){
-      await env.DB.batch([
-        env.DB.prepare("INSERT INTO qc_issuer_adapter_audit(issuer,actor,action,revision,created) SELECT issuer,?,'revoked',revision,? FROM qc_issuer_adapters WHERE issuer=?").bind(session.account,now,issuerId),
-        env.DB.prepare('DELETE FROM qc_issuer_adapters WHERE issuer=?').bind(issuerId),
+      const result=await env.DB.batch([
+        env.DB.prepare("INSERT INTO qc_issuer_adapter_audit(issuer,actor,action,revision,created) SELECT issuer,?,'revoked',revision,? FROM qc_issuer_adapters WHERE issuer=? AND "+writeGuard).bind(actor,now,issuerId,...guardArgs),
+        env.DB.prepare('DELETE FROM qc_issuer_adapters WHERE issuer=? AND '+writeGuard).bind(issuerId,...guardArgs),
       ]);
-      return respond({revoked:true});
+      return result[1].meta.changes===1?respond({revoked:true}):respond({error:'Adapter unavailable or permission changed'},409);
     }
     const {model,dailyLimit}=input;
     if(input.action!=='verify'||typeof model!=='string'||!/^[A-Za-z0-9/_-]{1,128}$/.test(model)||typeof dailyLimit!=='number'||!Number.isInteger(dailyLimit)||dailyLimit<1||dailyLimit>4)return respond({error:'Invalid adapter configuration'},400);
     const config=configuredAdapter(env,issuerId);
     if(!config||issuer.paused||issuer.authorizer!=='relayer.quotacarry-fund-7b29e1.testnet'||issuer.settler!=='settler.quotacarry-fund-7b29e1.testnet'||!await verifyAdapter(config,issuerId,model))return respond({error:'Adapter verification rejected'},409);
-    if((await readIssuer(issuerId))?.controller!==session.account)return respond({error:'Issuer controller changed'},403);
-    await env.DB.batch([
-      env.DB.prepare('INSERT INTO qc_issuer_adapters VALUES (?,?,?,?,?,?) ON CONFLICT(issuer) DO UPDATE SET controller=excluded.controller,revision=excluded.revision,model=excluded.model,daily_limit=excluded.daily_limit,updated=excluded.updated').bind(issuerId,session.account,config.revision,model,dailyLimit,now),
-      env.DB.prepare("INSERT INTO qc_issuer_adapter_audit(issuer,actor,action,revision,created) VALUES (?,?,'verified',?,?)").bind(issuerId,session.account,config.revision,now),
+    if((await readIssuer(issuerId))?.controller!==issuer.controller)return respond({error:'Issuer controller changed'},403);
+    const result=await env.DB.batch([
+      env.DB.prepare('INSERT INTO qc_issuer_adapters SELECT ?,?,?,?,?,? WHERE '+writeGuard+' ON CONFLICT(issuer) DO UPDATE SET controller=excluded.controller,revision=excluded.revision,model=excluded.model,daily_limit=excluded.daily_limit,updated=excluded.updated').bind(issuerId,issuer.controller,config.revision,model,dailyLimit,now,...guardArgs),
+      env.DB.prepare("INSERT INTO qc_issuer_adapter_audit(issuer,actor,action,revision,created) SELECT ?,?,'verified',?,? WHERE changes()=1").bind(issuerId,actor,config.revision,now),
     ]);
-    return respond({verified:true,issuer:issuerId,model,dailyLimit});
+    return result[0].meta.changes===1?respond({verified:true,issuer:issuerId,model,dailyLimit}):respond({error:'Issuer permission changed'},403);
   }
   if(req.method==='GET'&&/^\/v1\/jobs\/[a-f0-9-]{36}$/.test(path)){
     const job=await row(env,path.split('/').at(-1)!);
@@ -246,6 +300,14 @@ async function handle(req:Request,env:Env){
     }
     if(req.method==='POST'){
       const {nft,name,revokeId}=input;
+      if(typeof input.rotateId==='string'&&/^[a-f0-9-]{36}$/.test(input.rotateId)){
+        const previous=await env.DB.prepare('SELECT * FROM qc_developer_tokens WHERE id=? AND account=?').bind(input.rotateId,session.account)
+          .first<NonNullable<Awaited<ReturnType<typeof readDeveloperToken>>>>();
+        const pass=previous?await readEntitlement(previous.nft):null;
+        if(!previous||!pass||!matchesEntitlement(previous,pass)||!await adapterRoute(env,previous.issuer,previous.model))return respond({error:'Credential cannot be rotated'},409);
+        const replacement=await rotateDeveloperToken(env.DB,session.account,previous.id,pass);
+        return replacement?respond(replacement,201):respond({error:'Credential already changed'},409);
+      }
       if(typeof revokeId==='string'&&/^[a-f0-9-]{36}$/.test(revokeId)){
         const result=await revokeDeveloperToken(env.DB,session.account,revokeId);
         return result.meta.changes===1?respond({revoked:true}):respond({error:'Token not found'},404);

@@ -105,7 +105,7 @@ export default function Home() {
   }
 
   return <main className="shell">
-    <header><a className="brand" href="/">QuotaCarry</a><nav><a href="#dashboard">Dashboard</a><a href="#history">Verified demo</a></nav><button disabled={busy} onClick={account?disconnect:connect}>{account?'Disconnect wallet':'Connect wallet'}</button></header>
+    <header><a className="brand" href="/">QuotaCarry</a><nav><a href="#dashboard">My NFTs</a><a href="#developer-console">Developer Console</a><a href="#issuer-studio">Issuer Studio</a><a href="#history">Verified demo</a></nav><button disabled={busy} onClick={account?disconnect:connect}>{account?'Disconnect wallet':'Connect wallet'}</button></header>
     <section className="hero"><p className="eyebrow">NEAR TESTNET</p><h1>Transfer AI compute rights, <em>not API keys.</em></h1><p>QuotaCarry makes inference credits portable. A NEAR NFT carries its balance when ownership changes, and existing reservations remain settleable.</p><div className="links"><a className="primary" href="#dashboard">Open dashboard</a><a href={explorer+'/accounts/'+contract}>View contract ↗</a></div></section>
     <section id="dashboard"><div className="section-title"><h2>{account?'Your QuotaCarry NFTs':'Live testnet NFT'}</h2><span>{snapshot?'Finalized block '+snapshot.block:'NEAR testnet'}</span></div>
       {account&&<p className="mono">{account}</p>}

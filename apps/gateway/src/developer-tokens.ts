@@ -30,6 +30,16 @@ export function readDeveloperToken(db:D1Database, authorization:string|null) {
   return token ? db.prepare('SELECT * FROM qc_developer_tokens WHERE digest=?').bind(digest(token)).first<Credential>() : Promise.resolve(null);
 }
 
+export async function rotateDeveloperToken(db:D1Database,account:string,previous:string,pass:Entitlement){
+  const token='qc_'+randomBytes(32).toString('base64url'), id=randomUUID(), now=Date.now();
+  const result=await db.prepare(`INSERT INTO qc_developer_tokens(digest,id,account,nft,issuer,policy,epoch,name,model,expires,revoked,rotated_from)
+    SELECT ?,?,account,nft,issuer,policy,epoch,name,model,expires,NULL,id FROM qc_developer_tokens
+    WHERE id=? AND account=? AND issuer=? AND policy=? AND epoch=? AND revoked IS NULL AND expires>?
+    RETURNING id,nft,model,expires`).bind(digest(token),id,previous,account,pass.issuer_id,pass.policy_id,pass.epoch,now)
+    .first<{id:string;nft:string;model:string;expires:number}>();
+  return result?{...result,token}:null;
+}
+
 export function revokeDeveloperToken(db:D1Database, account:string, id:string) {
   return db.prepare('UPDATE qc_developer_tokens SET revoked=? WHERE account=? AND id=? AND revoked IS NULL')
     .bind(Date.now(),account,id).run();

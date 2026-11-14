@@ -1,6 +1,7 @@
 'use client';
 import {useState,useRef,type FormEvent} from 'react';
 import type {NearConnector} from '@hot-labs/near-connect';
+import {DeveloperConsole} from './developer-console';
 
 type ClaimStatus={enabled:boolean;eligible:boolean;remaining:number;claim?:{state:string;tx_hash?:string;token?:string}};
 type Job={id:string;state:string;reservation?:string;settlement?:string;output?:string};
@@ -98,6 +99,8 @@ export function Playground({account,tokens,connector,onSettled}:{account:string;
       </form>}
       {session&&tokens.length===0&&<p>No owned NFT is available for inference.</p>}
       {pending.current&&<button type="button" disabled={busy} onClick={()=>void resume()}>Check request status</button>}
+      {session&&<DeveloperConsole key={session} request={request}/>}
+      {!session&&<div><p id="developer-console">Authenticate your wallet to open Developer Console.</p><p id="issuer-studio">Authenticate your wallet to open Issuer Studio.</p></div>}
     </>}
     <p role="status">{message}{job?' '+job.state.replaceAll('_',' '):''}</p>
     {job?.reservation&&<p><a href={explorer+job.reservation}>Reservation receipt</a></p>}
